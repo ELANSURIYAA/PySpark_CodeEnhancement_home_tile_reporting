@@ -1,31 +1,24 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Data Model Evolution Package for adding tile metadata enrichment to home tile reporting pipeline
+Description: Data Model Evolution Package for Home Tile Reporting Enhancement with Metadata Integration
 =============================================
 
 # Data Model Evolution Package
-## Home Tile Reporting Enhancement - Tile Metadata Integration
-
-### Executive Summary
-This document outlines the data model changes required to integrate tile metadata into the existing home tile reporting pipeline. The evolution adds business categorization capabilities while maintaining backward compatibility and data integrity.
+## Home Tile Reporting Enhancement - Metadata Integration
 
 ---
 
 ## 1. Delta Summary Report
 
-### Impact Level: **MEDIUM**
+### Overview of Changes
+**Impact Level**: MEDIUM
+**Change Type**: Schema Enhancement with New Table Addition
+**Business Justification**: Enable category-level analytics and improved dashboard reporting capabilities
 
-### Change Overview
-| Change Type | Count | Description |
-|-------------|-------|-------------|
-| **Additions** | 2 | New source table + new target column |
-| **Modifications** | 2 | ETL pipeline updates + target table schema |
-| **Deprecations** | 0 | No deprecations |
-
-### Detailed Changes
+### Change Categories
 
 #### **Additions**
-1. **New Source Table**: `analytics_db.SOURCE_TILE_METADATA`
-   - Purpose: Master metadata for homepage tiles
-   - Fields: tile_id
+- **New Source Table**: `analytics_db.SOURCE_TILE_METADATA`
+  - Purpose: Master metadata for homepage tiles with business categorization
+  - Fields: tile_id

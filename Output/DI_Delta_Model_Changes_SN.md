@@ -1,24 +1,11 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Data Model Evolution Package for SOURCE_TILE_METADATA integration into Home Tile Reporting ETL pipeline
+Description: Data Model Evolution Package for Home Tile Reporting ETL enhancement with SOURCE_TILE_METADATA integration
 =============================================
 
-# Data Model Evolution Package (DMEA)
-## Home Tile Reporting Enhancement - Delta Model Changes
+# Data Model Evolution Package - Home Tile Reporting Enhancement
 
----
+## Executive Summary
 
-## 1. Delta Summary Report
-
-### Overview of Changes
-**Impact Level:** MEDIUM
-**Change Category:** Model Enhancement with New Table Integration
-**Risk Assessment:** Low to Medium (requires ETL pipeline updates)
-
-### Change Summary
-
-#### **Additions**
-1. **New Source Table:** `analytics_db.SOURCE_TILE_METADATA`
-   - **Purpose:** Master metadata for homepage tiles
-   - **Fields:** tile_id
+This Data Model Evolution Package documents the integration of the new `SOURCE_TILE_METADATA` table into the existing Home Tile Reporting ETL pipeline. The enhancement enriches reporting capabilities by adding tile metadata information (tile_name

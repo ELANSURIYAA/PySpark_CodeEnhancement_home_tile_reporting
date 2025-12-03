@@ -1,11 +1,9 @@
-'''
 ====================================================================
 Author: Ascendion AAVA
 Date: 
-Description: Comprehensive unit test suite for PySpark ETL pipeline home tile reporting with tile_category enrichment functionality
+Description: Comprehensive PyTest unit test suite for enhanced home tile reporting ETL pipeline with tile_category enrichment
 ====================================================================
-'''
 
 import pytest
-import sys
+import logging
 from unittest.mock import Mock

@@ -1,23 +1,12 @@
-====================================================================
-Author: Ascendion AAVA
-Date: 
-Description: Enhanced ETL to join tile metadata and output tile_category in daily summary.
-====================================================================
-
 """
 ===============================================================================
-                        CHANGE MANAGEMENT / REVISION HISTORY
+Author: Ascendion AAVA
+Date: 
+Description: Enhanced ETL pipeline to enrich daily summary with tile category from SOURCE_TILE_METADATA, preserving legacy logic for audit.
 ===============================================================================
-File Name       : home_tile_reporting_etl_Pipeline.py
-Author          : Ascendion AAVA
-Created Date    : 
-Last Modified   : <Auto-updated>
-Version         : 1.1.0
-Release         : R2 – Home Tile Reporting Enhancement with Metadata Join
-
 Functional Description:
     This ETL pipeline performs the following:
-    - Reads home tile interaction events, interstitial events, and tile metadata from Delta source tables
+    - Reads home tile interaction events, interstitial events, and tile metadata from source tables
     - Computes aggregated metrics:
         • Unique Tile Views
         • Unique Tile Clicks
@@ -25,7 +14,7 @@ Functional Description:
         • Unique Primary Button Clicks
         • Unique Secondary Button Clicks
         • CTRs for homepage tiles and interstitial buttons
-    - Enriches daily summary with tile_category from metadata
+    - Enriches daily summary with tile category
     - Loads aggregated results into:
         • TARGET_HOME_TILE_DAILY_SUMMARY (with tile_category)
         • TARGET_HOME_TILE_GLOBAL_KPIS
@@ -37,7 +26,7 @@ Change Log:
 Version     Date          Author          Description
 -------------------------------------------------------------------------------
 1.0.0       2025-12-02    <Your Name>     Initial version of the ETL pipeline
-1.1.0       <today>       Ascendion AAVA  [ADDED] Join with SOURCE_TILE_METADATA and output tile_category
+1.1.0       <Leave blank> Ascendion AAVA  [MODIFIED] Added tile category enrichment per SCRUM-7567
 -------------------------------------------------------------------------------
 """
 
@@ -51,37 +40,38 @@ PIPELINE_NAME = "HOME_TILE_REPORTING_ETL"
 
 SOURCE_HOME_TILE_EVENTS   = "analytics_db.SOURCE_HOME_TILE_EVENTS"
 SOURCE_INTERSTITIAL_EVENTS = "analytics_db.SOURCE_INTERSTITIAL_EVENTS"
-SOURCE_TILE_METADATA = "analytics_db.SOURCE_TILE_METADATA"  # [ADDED] New metadata source table
-
 TARGET_DAILY_SUMMARY = "reporting_db.TARGET_HOME_TILE_DAILY_SUMMARY"
 TARGET_GLOBAL_KPIS   = "reporting_db.TARGET_HOME_TILE_GLOBAL_KPIS"
-
 PROCESS_DATE = "2025-12-01"   # pass dynamically from ADF/Airflow if needed
 
-spark = (
-    SparkSession.getActiveSession()
-)
+# [ADDED] SCRUM-7567: Add tile metadata table
+SOURCE_TILE_METADATA = "analytics_db.SOURCE_TILE_METADATA"
+
+# [MODIFIED] Use Spark Connect compatible session
+spark = SparkSession.getActiveSession()
+if spark is None:
+    spark = SparkSession.builder.appName("HomeTileReportingETL").getOrCreate()
 
 # ------------------------------------------------------------------------------
 # READ SOURCE TABLES
 # ------------------------------------------------------------------------------
 df_tile = (
-    spark.read.format("delta").table(SOURCE_HOME_TILE_EVENTS)
+    spark.table(SOURCE_HOME_TILE_EVENTS)
     .filter(F.to_date("event_ts") == PROCESS_DATE)
 )
 
 df_inter = (
-    spark.read.format("delta").table(SOURCE_INTERSTITIAL_EVENTS)
+    spark.table(SOURCE_INTERSTITIAL_EVENTS)
     .filter(F.to_date("event_ts") == PROCESS_DATE)
 )
 
-# [ADDED] Read tile metadata table
-# This table contains tile_id, tile_name, tile_category, is_active, updated_ts
-# Used to enrich reporting outputs with tile_category
-
+# [ADDED] SCRUM-7567: Read tile metadata table
+# Only use active tiles for enrichment
+# If no match, will default to UNKNOWN
+# ------------------------------------------------------------------------------
 df_metadata = (
-    spark.read.format("delta").table(SOURCE_TILE_METADATA)
-    .select("tile_id", "tile_category")
+    spark.table(SOURCE_TILE_METADATA)
+    .filter(F.col("is_active") == True)
 )
 
 # ------------------------------------------------------------------------------
@@ -104,18 +94,29 @@ df_inter_agg = (
     )
 )
 
-# [MODIFIED] Outer join tile/interstitial events, then enrich with metadata
-# If tile_id not found in metadata, set tile_category to "UNKNOWN"
+# [DEPRECATED] Legacy join without metadata enrichment
+# df_daily_summary = (
+#     df_tile_agg.join(df_inter_agg, "tile_id", "outer")
+#     .withColumn("date", F.lit(PROCESS_DATE))
+#     .select(
+#         "date",
+#         "tile_id",
+#         F.coalesce("unique_tile_views", F.lit(0)).alias("unique_tile_views"),
+#         F.coalesce("unique_tile_clicks", F.lit(0)).alias("unique_tile_clicks"),
+#         F.coalesce("unique_interstitial_views", F.lit(0)).alias("unique_interstitial_views"),
+#         F.coalesce("unique_interstitial_primary_clicks", F.lit(0)).alias("unique_interstitial_primary_clicks"),
+#         F.coalesce("unique_interstitial_secondary_clicks", F.lit(0)).alias("unique_interstitial_secondary_clicks")
+#     )
+# )
 
+# [MODIFIED] SCRUM-7567: Enhanced daily summary with metadata join
+# ------------------------------------------------------------------------------
 df_daily_summary = (
     df_tile_agg.join(df_inter_agg, "tile_id", "outer")
-    .join(df_metadata, "tile_id", "left")  # [ADDED] Join with metadata
-    .withColumn("tile_category", F.coalesce(F.col("tile_category"), F.lit("UNKNOWN")))  # [ADDED] Default to UNKNOWN if missing
     .withColumn("date", F.lit(PROCESS_DATE))
     .select(
         "date",
         "tile_id",
-        "tile_category",  # [ADDED] Output tile_category
         F.coalesce("unique_tile_views", F.lit(0)).alias("unique_tile_views"),
         F.coalesce("unique_tile_clicks", F.lit(0)).alias("unique_tile_clicks"),
         F.coalesce("unique_interstitial_views", F.lit(0)).alias("unique_interstitial_views"),
@@ -124,13 +125,44 @@ df_daily_summary = (
     )
 )
 
+# [ADDED] SCRUM-7567: Join with metadata to add tile_category
+# Left join ensures all summary rows are preserved
+# If no metadata, tile_category defaults to UNKNOWN
+
+df_daily_summary_enhanced = (
+    df_daily_summary
+    .join(df_metadata.select("tile_id", "tile_category"), "tile_id", "left")
+    .withColumn("tile_category", F.coalesce(F.col("tile_category"), F.lit("UNKNOWN")))
+    .select(
+        "date",
+        "tile_id",
+        "tile_category",
+        "unique_tile_views",
+        "unique_tile_clicks",
+        "unique_interstitial_views",
+        "unique_interstitial_primary_clicks",
+        "unique_interstitial_secondary_clicks"
+    )
+)
+
+# [ADDED] SCRUM-7567: Data quality validation after join
+# Ensures no record loss during metadata enrichment
+
+def validate_metadata_join(df_summary, df_enhanced):
+    """Ensure no record loss during metadata join"""
+    original_count = df_summary.count()
+    enhanced_count = df_enhanced.count()
+    if original_count != enhanced_count:
+        raise ValueError(f"Record count mismatch: Original={original_count}, Enhanced={enhanced_count}")
+    return True
+
+validate_metadata_join(df_daily_summary, df_daily_summary_enhanced)
+
 # ------------------------------------------------------------------------------
-# GLOBAL KPIs
+# GLOBAL KPIs (Unchanged)
 # ------------------------------------------------------------------------------
-# [DEPRECATED] No change to global KPI table as per Jira story
-# (Leaving logic unchanged)
 df_global = (
-    df_daily_summary.groupBy("date")
+    df_daily_summary_enhanced.groupBy("date")
     .agg(
         F.sum("unique_tile_views").alias("total_tile_views"),
         F.sum("unique_tile_clicks").alias("total_tile_clicks"),
@@ -167,7 +199,8 @@ def overwrite_partition(df, table, partition_col="date"):
           .saveAsTable(table)
     )
 
-overwrite_partition(df_daily_summary, TARGET_DAILY_SUMMARY)
+# [MODIFIED] SCRUM-7567: Write enhanced summary with tile_category
+overwrite_partition(df_daily_summary_enhanced, TARGET_DAILY_SUMMARY)
 overwrite_partition(df_global, TARGET_GLOBAL_KPIS)
 
 print(f"ETL completed successfully for {PROCESS_DATE}")

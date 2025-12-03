@@ -1,59 +1,80 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Data Model Evolution Package for Home Tile Reporting Enhancement with Metadata Integration
+Description: Data Model Evolution Package for Home Tile Reporting ETL Pipeline - Analysis of current schema structure and potential evolution requirements
 =============================================
 
 # Data Model Evolution Package (DMEA)
-## Home Tile Reporting Enhancement - Metadata Integration
-
-### Executive Summary
-This Data Model Evolution Package documents the changes required to integrate tile metadata functionality into the existing Home Tile Reporting system. The enhancement adds business categorization capabilities to enable category-level reporting and analytics.
+## Home Tile Reporting ETL Pipeline Analysis
 
 ---
 
 ## 1. Delta Summary Report
 
-### Impact Level: **MEDIUM**
+### Overview of Current Data Model
+**Impact Level: LOW** - Current model is well-structured with no immediate breaking changes detected
 
-### Overview of Changes
-The enhancement involves adding a new source table for tile metadata and extending the existing target table to include tile categorization fields. This is a backward-compatible addition that enriches existing functionality without breaking current processes.
+### Current Model Structure Analysis:
 
-### Change Categories
+#### Source Tables (analytics_db):
+1. **SOURCE_HOME_TILE_EVENTS**
+   - Primary events table for tile interactions
+   - Partitioned by date(event_ts)
+   - Delta format with proper commenting
 
-#### **Additions**
-- **New Source Table**: `analytics_db.SOURCE_TILE_METADATA`
-- **New Target Columns**: 
-  - `tile_name` (STRING) in TARGET_HOME_TILE_DAILY_SUMMARY
-  - `tile_category` (STRING) in TARGET_HOME_TILE_DAILY_SUMMARY
-- **New ETL Logic**: LEFT JOIN with metadata table for enrichment
+2. **SOURCE_INTERSTITIAL_EVENTS**
+   - Interstitial interaction events
+   - Partitioned by date(event_ts)
+   - Delta format with boolean flags for actions
 
-#### **Modifications**
-- **ETL Pipeline**: Enhanced aggregation logic to include metadata enrichment
-- **Target Table Schema**: Extended with new columns while maintaining existing structure
-- **Configuration**: Added new source table reference
+3. **SOURCE_TILE_METADATA**
+   - Master metadata for tile information
+   - Contains business categorization
+   - Active/inactive tile management
 
-#### **Deprecations**
-- None - This is a purely additive enhancement
+#### Target Tables (reporting_db):
+1. **TARGET_HOME_TILE_DAILY_SUMMARY**
+   - Daily aggregated tile-level metrics
+   - Partitioned by date
+   - Supports unique user counting
 
-### Risk Assessment
-- **Data Loss Risk**: **LOW** - No existing data is modified or removed
-- **Breaking Changes**: **NONE** - Backward compatible implementation
-- **Performance Impact**: **LOW** - Single LEFT JOIN addition with minimal overhead
+2. **TARGET_HOME_TILE_GLOBAL_KPIS**
+   - Global KPI rollups
+   - CTR calculations
+   - Daily partition structure
+
+### Detected Changes:
+
+#### **Additions:**
+- ✅ No new tables detected in current analysis
+- ✅ All required columns present for current business logic
+- ✅ Proper partitioning strategy implemented
+
+#### **Modifications:**
+- ⚠️ **Potential Enhancement**: SOURCE_TILE_METADATA is not currently joined in ETL pipeline
+- ⚠️ **Data Type Consideration**: LONG data types in target tables may need BIGINT for very high volume scenarios
+- ⚠️ **Missing Index**: No explicit indexing strategy defined for performance optimization
+
+#### **Deprecations:**
+- ✅ No deprecated columns or tables identified
+- ✅ All source columns are actively used in transformations
+
+### Risk Assessment:
+- **Data Loss Risk**: LOW - No schema changes that would cause data loss
+- **Downstream Impact**: LOW - Current ETL pipeline is self-contained
+- **Performance Impact**: MEDIUM - Large table scans without proper indexing strategy
 
 ---
 
 ## 2. DDL Change Scripts
 
-### 2.1 Forward Migration Scripts
+### Forward-Only SQL (Enhancement Recommendations)
 
-#### Create New Source Table
 ```sql
--- SOURCE_TILE_METADATA Table Creation
--- Purpose: Master metadata for homepage tiles
--- Impact: New table addition
--- Reference: JIRA SCRUM-7567
+-- Enhancement 1: Add performance indexes for common query patterns
+-- Reason: Improve ETL performance for daily aggregations
+-- Tech Spec Reference: Performance optimization for production workloads
 
-CREATE TABLE IF NOT EXISTS analytics_db.SOURCE_TILE_METADATA 
-(
-    tile_id        STRING    COMMENT 'Tile identifier - Primary Key'
+-- Index on SOURCE_HOME_TILE_EVENTS for common filters
+CREATE INDEX IF NOT EXISTS idx_home_tile_events_date_type 
+ON analytics_db.SOURCE_HOME_TILE_EVENTS (date(event_ts)

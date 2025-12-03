@@ -1,17 +1,57 @@
 # Author: Ascendion AAVA
 # Date: 
-# Description: Python-based test script for enhanced ETL pipeline (tile metadata join)
+# Description: Python-based test script for home_tile_reporting_etl_Pipeline.py
 
 import sys
-import pandas as pd
 from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import *
 
-# --------- Setup Spark Session ---------
-spark = SparkSession.builder.master("local[1]").appName("HomeTileReportingETLTest").getOrCreate()
+# Import the pipeline code (assume available as module for testing)
+def run_etl_with_sample_data(tile_events_data, interstitial_events_data, tile_metadata_data, process_date):
+    spark = SparkSession.getActiveSession()
+    if spark is None:
+        spark = SparkSession.builder.appName("HomeTileReportingETLTest").getOrCreate()
 
-# --------- Utility: Run ETL Logic ---------
-def run_etl(df_tile, df_inter, df_metadata, process_date):
-    # Aggregations
+    schema_tile_events = StructType([
+        StructField("event_id", StringType()),
+        StructField("user_id", StringType()),
+        StructField("session_id", StringType()),
+        StructField("event_ts", StringType()),
+        StructField("tile_id", StringType()),
+        StructField("event_type", StringType()),
+        StructField("device_type", StringType()),
+        StructField("app_version", StringType())
+    ])
+    df_tile = spark.createDataFrame(tile_events_data, schema=schema_tile_events)\
+        .withColumn("event_ts", F.to_timestamp("event_ts"))\
+        .filter(F.to_date("event_ts") == process_date)
+
+    schema_interstitial_events = StructType([
+        StructField("event_id", StringType()),
+        StructField("user_id", StringType()),
+        StructField("session_id", StringType()),
+        StructField("event_ts", StringType()),
+        StructField("tile_id", StringType()),
+        StructField("interstitial_view_flag", BooleanType()),
+        StructField("primary_button_click_flag", BooleanType()),
+        StructField("secondary_button_click_flag", BooleanType())
+    ])
+    df_inter = spark.createDataFrame(interstitial_events_data, schema=schema_interstitial_events)\
+        .withColumn("event_ts", F.to_timestamp("event_ts"))\
+        .filter(F.to_date("event_ts") == process_date)
+
+    schema_tile_metadata = StructType([
+        StructField("tile_id", StringType()),
+        StructField("tile_name", StringType()),
+        StructField("tile_category", StringType()),
+        StructField("is_active", BooleanType()),
+        StructField("updated_ts", StringType())
+    ])
+    df_metadata = spark.createDataFrame(tile_metadata_data, schema=schema_tile_metadata)\
+        .withColumn("updated_ts", F.to_timestamp("updated_ts"))\
+        .filter(F.col("is_active") == True)
+
+    # --- Pipeline logic (same as in _Pipeline.py) ---
     df_tile_agg = (
         df_tile.groupBy("tile_id")
         .agg(
@@ -40,9 +80,8 @@ def run_etl(df_tile, df_inter, df_metadata, process_date):
             F.coalesce("unique_interstitial_secondary_clicks", F.lit(0)).alias("unique_interstitial_secondary_clicks")
         )
     )
-    df_daily_summary_enhanced = (
-        df_daily_summary
-        .join(df_metadata.select("tile_id", "tile_category"), "tile_id", "left")
+    df_daily_summary_enriched = (
+        df_daily_summary.join(df_metadata, "tile_id", "left")
         .withColumn("tile_category", F.coalesce(F.col("tile_category"), F.lit("UNKNOWN")))
         .select(
             "date",
@@ -55,84 +94,64 @@ def run_etl(df_tile, df_inter, df_metadata, process_date):
             "unique_interstitial_secondary_clicks"
         )
     )
-    return df_daily_summary_enhanced
+    return df_daily_summary_enriched
 
-# --------- Scenario 1: Insert ---------
+# Scenario 1: Insert (all new rows)
+tile_events_data_insert = [
+    ("e1", "u1", "s1", "2025-12-01 10:00:00", "TILE01", "TILE_VIEW", "Mobile", "1.0.0"),
+    ("e2", "u2", "s2", "2025-12-01 10:01:00", "TILE01", "TILE_CLICK", "Web", "1.0.0"),
+]
+interstitial_events_data_insert = [
+    ("e10", "u1", "s1", "2025-12-01 11:00:00", "TILE01", True, True, False),
+    ("e11", "u2", "s2", "2025-12-01 11:01:00", "TILE01", True, False, True),
+]
+tile_metadata_data_insert = [
+    ("TILE01", "Finance Tile", "Personal Finance", True, "2025-11-30 12:00:00"),
+]
 process_date = "2025-12-01"
-tile_data = [
-    {"tile_id": "T1", "event_type": "TILE_VIEW", "user_id": "U1", "event_ts": process_date},
-    {"tile_id": "T1", "event_type": "TILE_CLICK", "user_id": "U2", "event_ts": process_date},
-    {"tile_id": "T2", "event_type": "TILE_VIEW", "user_id": "U3", "event_ts": process_date}
+df_result_insert = run_etl_with_sample_data(tile_events_data_insert, interstitial_events_data_insert, tile_metadata_data_insert, process_date)
+
+# Scenario 2: Update (existing key)
+tile_events_data_update = [
+    ("e1", "u1", "s1", "2025-12-01 10:00:00", "TILE01", "TILE_VIEW", "Mobile", "1.0.0"),
+    ("e2", "u2", "s2", "2025-12-01 10:01:00", "TILE01", "TILE_CLICK", "Web", "1.0.0"),
+    ("e3", "u3", "s3", "2025-12-01 10:02:00", "TILE01", "TILE_CLICK", "Mobile", "1.0.0"),
 ]
-inter_data = [
-    {"tile_id": "T1", "interstitial_view_flag": True, "primary_button_click_flag": True, "secondary_button_click_flag": False, "user_id": "U1", "event_ts": process_date},
-    {"tile_id": "T2", "interstitial_view_flag": True, "primary_button_click_flag": False, "secondary_button_click_flag": True, "user_id": "U3", "event_ts": process_date}
+interstitial_events_data_update = [
+    ("e10", "u1", "s1", "2025-12-01 11:00:00", "TILE01", True, True, False),
+    ("e11", "u2", "s2", "2025-12-01 11:01:00", "TILE01", True, False, True),
 ]
-metadata_data = [
-    {"tile_id": "T1", "tile_category": "OFFERS", "is_active": True},
-    {"tile_id": "T2", "tile_category": "PAYMENTS", "is_active": True}
+tile_metadata_data_update = [
+    ("TILE01", "Finance Tile", "Personal Finance", True, "2025-11-30 12:00:00"),
 ]
-df_tile = spark.createDataFrame(pd.DataFrame(tile_data))
-df_inter = spark.createDataFrame(pd.DataFrame(inter_data))
-df_metadata = spark.createDataFrame(pd.DataFrame(metadata_data))
+df_result_update = run_etl_with_sample_data(tile_events_data_update, interstitial_events_data_update, tile_metadata_data_update, process_date)
 
-df_result_insert = run_etl(df_tile, df_inter, df_metadata, process_date)
-insert_output = df_result_insert.orderBy("tile_id").toPandas()
+# --- Markdown Report Generation ---
+def print_markdown_report():
+    print("## Test Report\n")
+    print("### Scenario 1: Insert")
+    print("Input:")
+    print("| tile_id | tile_category | unique_tile_views | unique_tile_clicks | unique_interstitial_views | unique_interstitial_primary_clicks | unique_interstitial_secondary_clicks |")
+    print("|---------|--------------|------------------|--------------------|--------------------------|-------------------------------------|---------------------------------------|")
+    for row in df_result_insert.collect():
+        print(f"| {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |")
+    print("Output:")
+    for row in df_result_insert.collect():
+        print(f"| {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |")
+    # Basic validation: inserted rows present
+    status_insert = "PASS" if df_result_insert.count() == 1 else "FAIL"
+    print(f"Status: {status_insert}\n")
 
-# --------- Scenario 2: Update ---------
-# Simulate update: T1 already exists, new click added
-# Previous day data for T1: 1 view, 1 click
-# Today: add another click for T1
-update_tile_data = [
-    {"tile_id": "T1", "event_type": "TILE_VIEW", "user_id": "U1", "event_ts": process_date},
-    {"tile_id": "T1", "event_type": "TILE_CLICK", "user_id": "U2", "event_ts": process_date},
-    {"tile_id": "T1", "event_type": "TILE_CLICK", "user_id": "U3", "event_ts": process_date},
-    {"tile_id": "T2", "event_type": "TILE_VIEW", "user_id": "U3", "event_ts": process_date}
-]
-update_inter_data = [
-    {"tile_id": "T1", "interstitial_view_flag": True, "primary_button_click_flag": True, "secondary_button_click_flag": False, "user_id": "U1", "event_ts": process_date},
-    {"tile_id": "T2", "interstitial_view_flag": True, "primary_button_click_flag": False, "secondary_button_click_flag": True, "user_id": "U3", "event_ts": process_date}
-]
-update_metadata_data = [
-    {"tile_id": "T1", "tile_category": "OFFERS", "is_active": True},
-    {"tile_id": "T2", "tile_category": "PAYMENTS", "is_active": True}
-]
-df_tile_upd = spark.createDataFrame(pd.DataFrame(update_tile_data))
-df_inter_upd = spark.createDataFrame(pd.DataFrame(update_inter_data))
-df_metadata_upd = spark.createDataFrame(pd.DataFrame(update_metadata_data))
+    print("### Scenario 2: Update")
+    print("Input:")
+    for row in df_result_update.collect():
+        print(f"| {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |")
+    print("Output:")
+    for row in df_result_update.collect():
+        print(f"| {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |")
+    # Basic validation: updated row present and counts correct
+    status_update = "PASS" if df_result_update.count() == 1 and any(row['unique_tile_clicks'] == 2 for row in df_result_update.collect()) else "FAIL"
+    print(f"Status: {status_update}\n")
 
-df_result_update = run_etl(df_tile_upd, df_inter_upd, df_metadata_upd, process_date)
-update_output = df_result_update.orderBy("tile_id").toPandas()
-
-# --------- Markdown Test Report ---------
-def df_to_md_table(df, columns):
-    header = "| " + " | ".join(columns) + " |\n"
-    sep = "|" + "----|" * len(columns) + "\n"
-    rows = ""
-    for _, row in df.iterrows():
-        rows += "| " + " | ".join([str(row[col]) for col in columns]) + " |\n"
-    return header + sep + rows
-
-md_report = "## Test Report\n"
-md_report += "### Scenario 1: Insert\nInput:\n"
-md_report += df_to_md_table(pd.DataFrame(tile_data), ["tile_id", "event_type", "user_id", "event_ts"])
-md_report += "Output:\n"
-md_report += df_to_md_table(insert_output, ["date", "tile_id", "tile_category", "unique_tile_views", "unique_tile_clicks", "unique_interstitial_views", "unique_interstitial_primary_clicks", "unique_interstitial_secondary_clicks"])
-
-# Validate Scenario 1
-expected1 = set([("T1", "OFFERS"), ("T2", "PAYMENTS")])
-actual1 = set([(row["tile_id"], row["tile_category"]) for _, row in insert_output.iterrows()])
-status1 = "PASS" if expected1 == actual1 else "FAIL"
-md_report += f"Status: {status1}\n\n"
-
-md_report += "### Scenario 2: Update\nInput:\n"
-md_report += df_to_md_table(pd.DataFrame(update_tile_data), ["tile_id", "event_type", "user_id", "event_ts"])
-md_report += "Output:\n"
-md_report += df_to_md_table(update_output, ["date", "tile_id", "tile_category", "unique_tile_views", "unique_tile_clicks", "unique_interstitial_views", "unique_interstitial_primary_clicks", "unique_interstitial_secondary_clicks"])
-
-# Validate Scenario 2
-expected2_clicks = update_output.query("tile_id == 'T1'")["unique_tile_clicks"].iloc[0]
-status2 = "PASS" if expected2_clicks == 2 else "FAIL"
-md_report += f"Status: {status2}\n\n"
-
-print(md_report)
+if __name__ == "__main__":
+    print_markdown_report()

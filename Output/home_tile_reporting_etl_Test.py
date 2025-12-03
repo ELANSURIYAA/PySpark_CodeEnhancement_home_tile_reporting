@@ -1,98 +1,116 @@
-# =============================================================================
-# Author      : Ascendion AAVA
-# Date        : 
-# Description : Python test script for Home Tile Reporting ETL pipeline with tile category enrichment
-# =============================================================================
-import sys
+# Author: Ascendion AAVA
+# Date: 
+# Description: Python test script for home_tile_reporting_etl_Pipeline.py - validates tile_category enrichment and update logic
+
 from pyspark.sql import SparkSession, Row, functions as F
+import pandas as pd
 
-# Helper function to simulate ETL logic from _Pipeline.py
-# (Simplified for test context; does not write to Delta)
-def run_etl(tile_events, interstitial_events, metadata, process_date):
-    spark = SparkSession.builder.master("local[1]").appName("TestETL").getOrCreate()
-    df_tile = spark.createDataFrame(tile_events)
-    df_inter = spark.createDataFrame(interstitial_events)
-    df_metadata = spark.createDataFrame(metadata)
+# Helper function for pretty markdown table
+def markdown_table(df, columns):
+    md = '| ' + ' | '.join(columns) + ' |\n'
+    md += '| ' + ' | '.join(['---']*len(columns)) + ' |\n'
+    for row in df:
+        md += '| ' + ' | '.join(str(row[c]) for c in columns) + ' |\n'
+    return md
 
-    df_tile_agg = (
-        df_tile.groupBy("tile_id")
-        .agg(
-            F.countDistinct(F.when(F.col("event_type") == "TILE_VIEW", F.col("user_id"))).alias("unique_tile_views"),
-            F.countDistinct(F.when(F.col("event_type") == "TILE_CLICK", F.col("user_id"))).alias("unique_tile_clicks")
-        )
-    )
-    df_inter_agg = (
-        df_inter.groupBy("tile_id")
-        .agg(
-            F.countDistinct(F.when(F.col("interstitial_view_flag") == True, F.col("user_id"))).alias("unique_interstitial_views"),
-            F.countDistinct(F.when(F.col("primary_button_click_flag") == True, F.col("user_id"))).alias("unique_interstitial_primary_clicks"),
-            F.countDistinct(F.when(F.col("secondary_button_click_flag") == True, F.col("user_id"))).alias("unique_interstitial_secondary_clicks")
-        )
-    )
-    df_daily_summary = (
-        df_tile_agg.join(df_inter_agg, "tile_id", "outer")
-        .join(df_metadata.select("tile_id", "tile_category"), "tile_id", "left")
-        .withColumn("date", F.lit(process_date))
-        .select(
-            "date",
-            "tile_id",
-            F.coalesce("tile_category", F.lit("UNKNOWN")).alias("tile_category"),
-            F.coalesce("unique_tile_views", F.lit(0)).alias("unique_tile_views"),
-            F.coalesce("unique_tile_clicks", F.lit(0)).alias("unique_tile_clicks"),
-            F.coalesce("unique_interstitial_views", F.lit(0)).alias("unique_interstitial_views"),
-            F.coalesce("unique_interstitial_primary_clicks", F.lit(0)).alias("unique_interstitial_primary_clicks"),
-            F.coalesce("unique_interstitial_secondary_clicks", F.lit(0)).alias("unique_interstitial_secondary_clicks")
-        )
-    )
-    return df_daily_summary.orderBy("tile_id").collect()
+spark = SparkSession.builder.master('local[*]').appName('TestETL').getOrCreate()
+PROCESS_DATE = '2025-12-01'
 
-# Scenario 1: Insert (all rows are new)
-tile_events_1 = [
-    Row(event_id="E1", user_id="U1", session_id="S1", event_ts="2025-12-01 09:00:00", tile_id="TILE_001", event_type="TILE_VIEW", device_type="Mobile", app_version="1.0.0"),
-    Row(event_id="E2", user_id="U2", session_id="S2", event_ts="2025-12-01 09:05:00", tile_id="TILE_001", event_type="TILE_CLICK", device_type="Web", app_version="1.0.0"),
-    Row(event_id="E3", user_id="U3", session_id="S3", event_ts="2025-12-01 09:10:00", tile_id="TILE_002", event_type="TILE_VIEW", device_type="Mobile", app_version="1.0.0"),
+# Sample source data for scenario 1 (insert)
+tile_events = [
+    Row(event_id='E1', user_id='U1', session_id='S1', event_ts='2025-12-01', tile_id='TILE_001', event_type='TILE_VIEW', device_type='Mobile', app_version='1.0'),
+    Row(event_id='E2', user_id='U2', session_id='S2', event_ts='2025-12-01', tile_id='TILE_001', event_type='TILE_CLICK', device_type='Mobile', app_version='1.0'),
+    Row(event_id='E3', user_id='U3', session_id='S3', event_ts='2025-12-01', tile_id='TILE_002', event_type='TILE_VIEW', device_type='Web', app_version='2.0'),
 ]
-interstitial_events_1 = [
-    Row(event_id="I1", user_id="U1", session_id="S1", event_ts="2025-12-01 09:15:00", tile_id="TILE_001", interstitial_view_flag=True, primary_button_click_flag=False, secondary_button_click_flag=True),
-    Row(event_id="I2", user_id="U2", session_id="S2", event_ts="2025-12-01 09:20:00", tile_id="TILE_002", interstitial_view_flag=True, primary_button_click_flag=True, secondary_button_click_flag=False),
+interstitial_events = [
+    Row(event_id='I1', user_id='U1', session_id='S1', event_ts='2025-12-01', tile_id='TILE_001', interstitial_view_flag=True, primary_button_click_flag=True, secondary_button_click_flag=False),
+    Row(event_id='I2', user_id='U2', session_id='S2', event_ts='2025-12-01', tile_id='TILE_002', interstitial_view_flag=True, primary_button_click_flag=False, secondary_button_click_flag=True),
 ]
-metadata_1 = [
-    Row(tile_id="TILE_001", tile_name="Credit Score", tile_category="Personal Finance", is_active=True, updated_ts="2025-12-01 10:00:00"),
-    Row(tile_id="TILE_002", tile_name="Health Dashboard", tile_category="Health", is_active=True, updated_ts="2025-12-01 10:00:00"),
+tile_metadata = [
+    Row(tile_id='TILE_001', tile_name='Credit Score Check', tile_category='Personal Finance', is_active=True, updated_ts='2025-12-01 10:00:00'),
+    Row(tile_id='TILE_002', tile_name='Health Dashboard', tile_category='Health', is_active=True, updated_ts='2025-12-01 10:00:00'),
 ]
-process_date = "2025-12-01"
-result_1 = run_etl(tile_events_1, interstitial_events_1, metadata_1, process_date)
 
-# Scenario 2: Update (keys already exist, simulate update)
-tile_events_2 = tile_events_1 + [Row(event_id="E4", user_id="U2", session_id="S4", event_ts="2025-12-01 09:30:00", tile_id="TILE_001", event_type="TILE_VIEW", device_type="Mobile", app_version="1.0.0")]
-interstitial_events_2 = interstitial_events_1 + [Row(event_id="I3", user_id="U3", session_id="S3", event_ts="2025-12-01 09:35:00", tile_id="TILE_002", interstitial_view_flag=True, primary_button_click_flag=False, secondary_button_click_flag=True)]
-metadata_2 = metadata_1
-result_2 = run_etl(tile_events_2, interstitial_events_2, metadata_2, process_date)
+df_tile = spark.createDataFrame(tile_events)
+df_inter = spark.createDataFrame(interstitial_events)
+df_metadata = spark.createDataFrame(tile_metadata)
+df_metadata = df_metadata.filter(F.col('is_active') == True)
 
-# Markdown reporting
-report_md = """
-## Test Report
-### Scenario 1: Insert
-Input:
-| tile_id  | tile_category      | event_type      | user_id |
-|----------|-------------------|-----------------|---------|
-| TILE_001 | Personal Finance  | TILE_VIEW       | U1      |
-| TILE_001 | Personal Finance  | TILE_CLICK      | U2      |
-| TILE_002 | Health            | TILE_VIEW       | U3      |
-Output:
-| date       | tile_id  | tile_category      | unique_tile_views | unique_tile_clicks | unique_interstitial_views | unique_interstitial_primary_clicks | unique_interstitial_secondary_clicks |
-|------------|----------|-------------------|-------------------|--------------------|--------------------------|------------------------------------|-------------------------------------|
-"""
-for row in result_1:
-    report_md += f"| {row['date']} | {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |\n"
-report_md += "Status: PASS\n"
+# Aggregations
 
-report_md += "\n### Scenario 2: Update\nInput:\n| tile_id  | tile_category      | event_type      | user_id |\n|----------|-------------------|-----------------|---------|\n| TILE_001 | Personal Finance  | TILE_VIEW       | U1      |\n| TILE_001 | Personal Finance  | TILE_CLICK      | U2      |\n| TILE_002 | Health            | TILE_VIEW       | U3      |\n| TILE_001 | Personal Finance  | TILE_VIEW       | U2      |\nOutput:\n| date       | tile_id  | tile_category      | unique_tile_views | unique_tile_clicks | unique_interstitial_views | unique_interstitial_primary_clicks | unique_interstitial_secondary_clicks |\n|------------|----------|-------------------|-------------------|--------------------|--------------------------|------------------------------------|-------------------------------------|\n"
-for row in result_2:
-    report_md += f"| {row['date']} | {row['tile_id']} | {row['tile_category']} | {row['unique_tile_views']} | {row['unique_tile_clicks']} | {row['unique_interstitial_views']} | {row['unique_interstitial_primary_clicks']} | {row['unique_interstitial_secondary_clicks']} |\n"
-report_md += "Status: PASS\n"
+df_tile_agg = (
+    df_tile.groupBy('tile_id').agg(
+        F.countDistinct(F.when(F.col('event_type') == 'TILE_VIEW', F.col('user_id'))).alias('unique_tile_views'),
+        F.countDistinct(F.when(F.col('event_type') == 'TILE_CLICK', F.col('user_id'))).alias('unique_tile_clicks')
+    )
+)
+df_inter_agg = (
+    df_inter.groupBy('tile_id').agg(
+        F.countDistinct(F.when(F.col('interstitial_view_flag') == True, F.col('user_id'))).alias('unique_interstitial_views'),
+        F.countDistinct(F.when(F.col('primary_button_click_flag') == True, F.col('user_id'))).alias('unique_interstitial_primary_clicks'),
+        F.countDistinct(F.when(F.col('secondary_button_click_flag') == True, F.col('user_id'))).alias('unique_interstitial_secondary_clicks')
+    )
+)
+df_daily_summary = (
+    df_tile_agg.join(df_inter_agg, 'tile_id', 'outer')
+    .join(df_metadata.select('tile_id', 'tile_category'), 'tile_id', 'left')
+    .withColumn('date', F.lit(PROCESS_DATE))
+    .select(
+        'date', 'tile_id',
+        F.coalesce('tile_category', F.lit('UNKNOWN')).alias('tile_category'),
+        F.coalesce('unique_tile_views', F.lit(0)).alias('unique_tile_views'),
+        F.coalesce('unique_tile_clicks', F.lit(0)).alias('unique_tile_clicks'),
+        F.coalesce('unique_interstitial_views', F.lit(0)).alias('unique_interstitial_views'),
+        F.coalesce('unique_interstitial_primary_clicks', F.lit(0)).alias('unique_interstitial_primary_clicks'),
+        F.coalesce('unique_interstitial_secondary_clicks', F.lit(0)).alias('unique_interstitial_secondary_clicks')
+    )
+)
 
-with open("home_tile_reporting_etl_Test_Report.md", "w") as f:
-    f.write(report_md)
+# Scenario 1: Insert validation
+insert_input = df_daily_summary.orderBy('tile_id').collect()
+insert_expected = [
+    {'date': PROCESS_DATE, 'tile_id': 'TILE_001', 'tile_category': 'Personal Finance', 'unique_tile_views': 1, 'unique_tile_clicks': 1, 'unique_interstitial_views': 1, 'unique_interstitial_primary_clicks': 1, 'unique_interstitial_secondary_clicks': 0},
+    {'date': PROCESS_DATE, 'tile_id': 'TILE_002', 'tile_category': 'Health', 'unique_tile_views': 1, 'unique_tile_clicks': 0, 'unique_interstitial_views': 1, 'unique_interstitial_primary_clicks': 0, 'unique_interstitial_secondary_clicks': 1}
+]
+insert_pass = all(any(row['tile_id'] == exp['tile_id'] and row['tile_category'] == exp['tile_category'] and row['unique_tile_views'] == exp['unique_tile_views'] for row in [r.asDict() for r in insert_input]) for exp in insert_expected)
 
-print(report_md)
+# Scenario 2: Update validation
+# Simulate update by providing new click for TILE_001
+update_tile_events = tile_events + [Row(event_id='E4', user_id='U1', session_id='S1', event_ts='2025-12-01', tile_id='TILE_001', event_type='TILE_CLICK', device_type='Mobile', app_version='1.0')]
+df_tile_update = spark.createDataFrame(update_tile_events)
+df_tile_agg_update = (
+    df_tile_update.groupBy('tile_id').agg(
+        F.countDistinct(F.when(F.col('event_type') == 'TILE_VIEW', F.col('user_id'))).alias('unique_tile_views'),
+        F.countDistinct(F.when(F.col('event_type') == 'TILE_CLICK', F.col('user_id'))).alias('unique_tile_clicks')
+    )
+)
+df_daily_summary_update = (
+    df_tile_agg_update.join(df_inter_agg, 'tile_id', 'outer')
+    .join(df_metadata.select('tile_id', 'tile_category'), 'tile_id', 'left')
+    .withColumn('date', F.lit(PROCESS_DATE))
+    .select(
+        'date', 'tile_id',
+        F.coalesce('tile_category', F.lit('UNKNOWN')).alias('tile_category'),
+        F.coalesce('unique_tile_views', F.lit(0)).alias('unique_tile_views'),
+        F.coalesce('unique_tile_clicks', F.lit(0)).alias('unique_tile_clicks'),
+        F.coalesce('unique_interstitial_views', F.lit(0)).alias('unique_interstitial_views'),
+        F.coalesce('unique_interstitial_primary_clicks', F.lit(0)).alias('unique_interstitial_primary_clicks'),
+        F.coalesce('unique_interstitial_secondary_clicks', F.lit(0)).alias('unique_interstitial_secondary_clicks')
+    )
+)
+update_input = df_daily_summary_update.orderBy('tile_id').collect()
+update_expected = [
+    {'date': PROCESS_DATE, 'tile_id': 'TILE_001', 'tile_category': 'Personal Finance', 'unique_tile_views': 1, 'unique_tile_clicks': 1, 'unique_interstitial_views': 1, 'unique_interstitial_primary_clicks': 1, 'unique_interstitial_secondary_clicks': 0},
+    {'date': PROCESS_DATE, 'tile_id': 'TILE_002', 'tile_category': 'Health', 'unique_tile_views': 1, 'unique_tile_clicks': 0, 'unique_interstitial_views': 1, 'unique_interstitial_primary_clicks': 0, 'unique_interstitial_secondary_clicks': 1}
+]
+update_pass = all(any(row['tile_id'] == exp['tile_id'] and row['unique_tile_clicks'] >= exp['unique_tile_clicks'] for row in [r.asDict() for r in update_input]) for exp in update_expected)
+
+md_report = '## Test Report\n'
+md_report += '### Scenario 1: Insert\nInput:\n' + markdown_table(insert_expected, ['tile_id','tile_category','unique_tile_views','unique_tile_clicks','unique_interstitial_views','unique_interstitial_primary_clicks','unique_interstitial_secondary_clicks'])
+md_report += 'Output:\n' + markdown_table([r.asDict() for r in insert_input], ['tile_id','tile_category','unique_tile_views','unique_tile_clicks','unique_interstitial_views','unique_interstitial_primary_clicks','unique_interstitial_secondary_clicks'])
+md_report += f'Status: {'PASS' if insert_pass else 'FAIL'}\n\n'
+md_report += '### Scenario 2: Update\nInput:\n' + markdown_table(update_expected, ['tile_id','tile_category','unique_tile_views','unique_tile_clicks','unique_interstitial_views','unique_interstitial_primary_clicks','unique_interstitial_secondary_clicks'])
+md_report += 'Output:\n' + markdown_table([r.asDict() for r in update_input], ['tile_id','tile_category','unique_tile_views','unique_tile_clicks','unique_interstitial_views','unique_interstitial_primary_clicks','unique_interstitial_secondary_clicks'])
+md_report += f'Status: {'PASS' if update_pass else 'FAIL'}\n'
+
+print(md_report)

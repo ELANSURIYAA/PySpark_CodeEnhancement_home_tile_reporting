@@ -1,134 +1,133 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Functional test cases for SOURCE_TILE_METADATA integration and tile category enrichment in TARGET_HOME_TILE_DAILY_SUMMARY
+Description: Functional test cases for validating the integration of SOURCE_TILE_METADATA and tile_category enrichment in home tile reporting ETL pipeline.
 =============================================
 
 ### Test Case ID: TC_PCE3_01
 **Title:** Validate creation of SOURCE_TILE_METADATA table
-**Description:** Ensure the SOURCE_TILE_METADATA table is created with all required columns and correct data types.
+**Description:** Ensure the SOURCE_TILE_METADATA table is created with the correct schema and all required columns.
 **Preconditions:**
-- Database analytics_db is accessible
-- Appropriate permissions to create tables
+- Access to analytics_db schema
+- Sufficient permissions to create tables
 **Steps to Execute:**
-1. Execute the DDL script for SOURCE_TILE_METADATA.
-2. Verify the table exists in analytics_db.
-3. Check that columns tile_id, tile_name, tile_category, is_active, updated_ts are present and of correct types.
+1. Check if SOURCE_TILE_METADATA exists in analytics_db.
+2. Describe the table schema.
+3. Verify columns: tile_id, tile_name, tile_category, is_active, updated_ts
 **Expected Result:**
-- Table is created successfully with specified columns and types.
+- Table exists with all columns and correct data types as per specification.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_02
-**Title:** Validate insertion and retrieval of metadata records
-**Description:** Ensure records can be inserted and retrieved from SOURCE_TILE_METADATA table.
+**Title:** Validate ETL reads active metadata records only
+**Description:** Ensure that the ETL pipeline reads only records where is_active = true from SOURCE_TILE_METADATA.
 **Preconditions:**
-- SOURCE_TILE_METADATA table exists
+- SOURCE_TILE_METADATA contains both active and inactive records
 **Steps to Execute:**
-1. Insert a sample record into SOURCE_TILE_METADATA (e.g., tile_id='TILE_001', tile_name='Credit Score Check', tile_category='Personal Finance', is_active=true).
-2. Query the table for tile_id='TILE_001'.
+1. Insert test records with is_active true and false.
+2. Run the ETL pipeline.
+3. Check intermediate dataframe for presence of inactive records.
 **Expected Result:**
-- Inserted record is retrieved with correct values.
+- Only records with is_active = true are processed in the ETL.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_03
-**Title:** Validate ETL pipeline enrichment with tile metadata
-**Description:** Ensure ETL pipeline joins SOURCE_TILE_METADATA and enriches daily summary with tile_name and tile_category.
+**Title:** Validate tile_category enrichment in target summary
+**Description:** Ensure tile_category is correctly joined and populated in TARGET_HOME_TILE_DAILY_SUMMARY.
 **Preconditions:**
-- SOURCE_TILE_METADATA table populated with active records
-- Daily event data available
+- SOURCE_TILE_METADATA and source event tables are populated
 **Steps to Execute:**
-1. Run the ETL pipeline for a day with events for a tile present in metadata.
-2. Verify TARGET_HOME_TILE_DAILY_SUMMARY contains tile_name and tile_category for each tile_id.
+1. Run the ETL pipeline.
+2. Query TARGET_HOME_TILE_DAILY_SUMMARY for recent data.
+3. Verify that tile_category matches the value in SOURCE_TILE_METADATA for each tile_id.
 **Expected Result:**
-- Summary table is enriched with correct tile_name and tile_category values.
+- tile_category is populated and correct for each tile_id.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_04
-**Title:** Validate handling of missing metadata (default values)
-**Description:** Ensure that when no metadata exists for a tile_id, ETL populates tile_name='Unknown Tile' and tile_category='UNKNOWN'.
+**Title:** Validate defaulting tile_category to 'UNKNOWN' when no metadata exists
+**Description:** Ensure that if a tile_id in the summary has no matching metadata, tile_category is set to 'UNKNOWN'.
 **Preconditions:**
-- SOURCE_TILE_METADATA does not contain metadata for a specific tile_id
-- Daily event data available for that tile_id
+- TARGET_HOME_TILE_DAILY_SUMMARY contains tile_ids not present in SOURCE_TILE_METADATA
 **Steps to Execute:**
-1. Run ETL pipeline with an event for a tile_id not present in metadata.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY for that tile_id.
+1. Ensure some tile_ids in the daily summary have no metadata entry.
+2. Run the ETL pipeline.
+3. Query the output for those tile_ids.
 **Expected Result:**
-- tile_name is 'Unknown Tile' and tile_category is 'UNKNOWN' in the summary table.
+- tile_category is 'UNKNOWN' for all unmatched tile_ids.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_05
-**Title:** Validate filtering of inactive tiles in enrichment
-**Description:** Ensure only active tiles (is_active=true) from SOURCE_TILE_METADATA are joined and enriched; inactive tiles are ignored.
+**Title:** Validate no record loss during metadata join
+**Description:** Ensure that the number of records in the daily summary does not decrease after enriching with metadata (left join preserves all rows).
 **Preconditions:**
-- SOURCE_TILE_METADATA contains both active and inactive tile records
-- Daily event data available for both
+- Both source event and metadata tables are populated
 **Steps to Execute:**
-1. Run ETL pipeline with events for tile_ids with is_active=true and is_active=false.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY.
+1. Count records in the original summary before join.
+2. Count records after metadata enrichment.
 **Expected Result:**
-- Only active tile metadata is joined; inactive tiles get default values ('Unknown Tile', 'UNKNOWN').
+- Record count is unchanged after join.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_06
-**Title:** Validate schema evolution of TARGET_HOME_TILE_DAILY_SUMMARY
-**Description:** Ensure new columns tile_name and tile_category are added to the summary table without impacting existing columns/data.
+**Title:** Validate only valid/active tile categories are used
+**Description:** Ensure only valid, active tile categories are assigned (e.g., OFFERS, HEALTH_CHECKS, PAYMENTS, PERSONAL_FINANCE, UNKNOWN).
 **Preconditions:**
-- Existing TARGET_HOME_TILE_DAILY_SUMMARY table populated with historical data
+- SOURCE_TILE_METADATA contains a mix of valid and invalid categories
 **Steps to Execute:**
-1. Run ALTER TABLE to add tile_name and tile_category.
-2. Verify existing data remains unchanged; new columns are NULL or default for previous records.
+1. Insert records with valid and invalid tile_category values.
+2. Run the ETL pipeline.
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY and check unique tile_category values.
 **Expected Result:**
-- Existing data is intact; new columns added successfully.
+- Only valid categories and 'UNKNOWN' appear in the output.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_07
-**Title:** Validate unit test for tile_category enrichment
-**Description:** Ensure unit test validates correct population of tile_category from metadata and default value handling.
+**Title:** Validate schema evolution and backward compatibility
+**Description:** Ensure that the addition of tile_category to the target table does not break downstream processes or existing queries.
 **Preconditions:**
-- Unit test framework configured
-- Test data available
+- Existing dashboards or queries reference TARGET_HOME_TILE_DAILY_SUMMARY
 **Steps to Execute:**
-1. Run unit tests for ETL transformation logic.
-2. Check assertions for tile_category enrichment and default value fallback.
+1. Add tile_category column via DDL.
+2. Run existing queries/dashboards on the target table.
 **Expected Result:**
-- All assertions pass; tile_category populated as expected.
+- All queries and dashboards run successfully; no errors due to schema changes.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_08
-**Title:** Validate reporting output includes tile_category
-**Description:** Ensure reporting outputs (dashboards, extracts) include tile_category and values match enriched summary table.
+**Title:** Validate ETL error handling for schema drift
+**Description:** Ensure the ETL pipeline fails gracefully with a clear error message if the metadata schema changes unexpectedly.
 **Preconditions:**
-- ETL pipeline has run successfully
-- Reporting tools configured
+- ETL pipeline is configured for schema validation
 **Steps to Execute:**
-1. Generate reporting extract or dashboard view from TARGET_HOME_TILE_DAILY_SUMMARY.
-2. Verify tile_category values match those in the summary table.
+1. Alter SOURCE_TILE_METADATA to add/remove a column.
+2. Run the ETL pipeline.
 **Expected Result:**
-- Reporting output includes correct tile_category values for all tiles.
+- ETL fails with a descriptive error about schema mismatch.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_09
-**Title:** Validate backward compatibility and record counts
-**Description:** Ensure the enhancement does not impact existing record counts and metrics in the summary table.
+**Title:** Validate partition overwrite and data retention
+**Description:** Ensure that the ETL overwrites only the intended partitions in the target table and respects retention policies.
 **Preconditions:**
-- Historical data available in TARGET_HOME_TILE_DAILY_SUMMARY
+- TARGET_HOME_TILE_DAILY_SUMMARY is partitioned by date
 **Steps to Execute:**
-1. Compare record counts and metric values before and after schema change.
-2. Validate no change except for addition of new columns.
+1. Run the ETL for a specific date range.
+2. Verify only those partitions are overwritten.
+3. Check that older data/partitions remain intact.
 **Expected Result:**
-- Record counts and existing metrics remain unchanged; only new columns added.
+- Only selected partitions are overwritten; no data loss outside range.
 **Linked Jira Ticket:** PCE-3
 
 ### Test Case ID: TC_PCE3_10
-**Title:** Validate error handling when metadata table is unavailable
-**Description:** Ensure ETL pipeline logs a warning and continues gracefully if SOURCE_TILE_METADATA is unavailable.
+**Title:** Validate ETL idempotency with metadata enrichment
+**Description:** Ensure that rerunning the ETL with the same input does not produce duplicate or inconsistent results in the target table.
 **Preconditions:**
-- ETL pipeline configured
-- Metadata table temporarily removed or inaccessible
+- All source tables are populated
 **Steps to Execute:**
-1. Trigger ETL pipeline with SOURCE_TILE_METADATA inaccessible.
-2. Check logs for warning message.
-3. Verify ETL completes and summary table uses default values for tile_name and tile_category.
+1. Run the ETL pipeline for a given date.
+2. Run the ETL pipeline again for the same date.
+3. Compare results in TARGET_HOME_TILE_DAILY_SUMMARY.
 **Expected Result:**
-- Warning is logged; ETL completes; defaults used for metadata columns.
+- Results are identical; no duplicates or inconsistencies.
 **Linked Jira Ticket:** PCE-3

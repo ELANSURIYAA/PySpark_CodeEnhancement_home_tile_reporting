@@ -1,68 +1,76 @@
 ==================================================
 Author: Ascendion AAVA
 Date: 
-Description: PySpark ETL pipeline and test script for home tile reporting, enhanced with tile category enrichment per business requirements (SCRUM-7567)
+Description: Code review for PySpark ETL pipeline update to enrich home tile reporting with tile category from metadata table (SCRUM-7567)
 ==================================================
 
-## Summary of changes
+## Summary of Changes
 
-### List of Deviations (file, line, type)
-- **Input/home_tile_reporting_etl.py** (Original):
-  - No tile metadata join/enrichment
-  - No tile_category field in output
-  - No validation for metadata join integrity
-  - Legacy write logic for daily summary (no enrichment)
-  - No inline documentation for new business logic
-- **Output/home_tile_reporting_etl_Pipeline.py** (Enhanced):
-  - [ADDED] Tile metadata source and DataFrame creation
-  - [MODIFIED] Join between summary and metadata for tile_category enrichment
-  - [ADDED] tile_category column in output, defaulted to 'UNKNOWN' if missing
-  - [ADDED] Data quality validation for join integrity
-  - [DEPRECATED] Legacy write logic commented out
-  - [ADDED] Inline documentation and clear annotation tags for all changes
-  - [ADDED] Ready-to-run sample data for all sources
-  - [ADDED] No breaking changes; fallback and comments provided where logic changed
+### 1. Structural Changes
+| File                                   | Line(s)      | Type         | Description                                                     |
+|----------------------------------------|--------------|--------------|-----------------------------------------------------------------|
+| home_tile_reporting_etl.py             | Config, Read | [ADDED]      | Added SOURCE_TILE_METADATA source config                        |
+| home_tile_reporting_etl.py             | Read         | [ADDED]      | Read and filter metadata table for active tiles                 |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Join metadata to tile/interstitial aggregation                  |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Add tile_category to daily summary output                      |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Default tile_category to 'UNKNOWN' if not mapped               |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Logging for unmapped tiles                                      |
+| home_tile_reporting_etl.py             | Validation   | [ADDED]      | Schema validation for new tile_category column                  |
+| home_tile_reporting_etl.py             | Deprecated   | [DEPRECATED] | Previous daily summary logic without tile_category (commented)  |
+| home_tile_reporting_etl.py             | SparkSession | [MODIFIED]   | Use Spark Connect compatible session                            |
 
-### Categorization_Changes
-- **Structural (High Severity):**
-  - Addition of new tile metadata source and join logic
-  - Output schema changed (tile_category field added)
-  - Data quality validation function added
-- **Semantic (High Severity):**
-  - Output is now enriched with business-relevant tile_category
-  - Defaulting logic for missing metadata (ensures reporting completeness)
-  - Validation prevents silent data loss
-- **Quality (Medium Severity):**
-  - Inline documentation and change management header improved
-  - Deprecated code blocks retained for auditability
-  - All changes annotated for reviewer clarity
+### 2. Semantic Changes
+| File                                   | Line(s)      | Type         | Description                                                     |
+|----------------------------------------|--------------|--------------|-----------------------------------------------------------------|
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Reporting now enriched with tile_category from metadata         |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Only active tiles from metadata included                        |
+| home_tile_reporting_etl.py             | Aggregation  | [ADDED]      | Unmapped tiles explicitly marked as 'UNKNOWN'                   |
+| home_tile_reporting_etl.py             | Validation   | [ADDED]      | Assertion for schema correctness (fail-fast for errors)         |
 
-### Additional Optimization Suggestions
-- Consider parameterizing process date for full automation
-- Add unit test coverage for edge cases (missing metadata, empty input)
-- Use config-driven source/target table names for portability
-- If scale increases, evaluate broadcast join for metadata if small
-- Add logging for join integrity validation exceptions
+### 3. Quality Changes
+| File                                   | Line(s)      | Type         | Description                                                     | Severity |
+|----------------------------------------|--------------|--------------|-----------------------------------------------------------------|----------|
+| home_tile_reporting_etl.py             | Logging      | [ADDED]      | Logging for metadata load and unmapped tiles                    | Low      |
+| home_tile_reporting_etl.py             | Validation   | [ADDED]      | Assert schema before write                                      | High     |
+| home_tile_reporting_etl.py             | Deprecated   | [DEPRECATED] | Old logic commented for traceability                            | Low      |
+| home_tile_reporting_etl.py             | Inline Docs  | [ADDED]      | Inline change tags ([ADDED], [MODIFIED], [DEPRECATED])          | Medium   |
 
-||||||
+---
+
+## Categorization of Changes
+- **Structural:** Addition of new source table (tile metadata), join logic, and output column.
+- **Semantic:** Reporting logic now covers tile_category enrichment and active tile filtering.
+- **Quality:** Improved validation, error handling, and inline documentation.
+
+---
+
+## Additional Optimization Suggestions
+- Parameterize `PROCESS_DATE` for dynamic pipeline runs via config or orchestration.
+- Consider caching `df_metadata` if source table is large and reused across joins.
+- Move logging to a central logger (e.g., log4j or Databricks notebook logger) for production.
+- Add unit tests for error scenarios (e.g., missing metadata, schema mismatch) and edge cases.
+- Review indexing/partitioning on target tables for query performance post-enrichment.
+- Evaluate cost of left joins if tile/interstitial event tables are large (consider broadcast join if metadata is small).
+- Add pipeline metrics tracking (duration, record counts) for monitoring.
+
+---
+
 ## Cost Estimation and Justification
-- **Development Effort:** ~4-6 hours for analysis, code delta, testing, and documentation.
-- **Testing Effort:** ~2-3 hours for test script creation and validation.
-- **Deployment Effort:** Minimal, as code is self-contained and ready for Databricks.
-- **Justification:** All changes are backward compatible, maintain auditability, and enrich business reporting as requested.
+- **Development:**
+  - Code change: ~1.5-2 person-days (analysis, enrichment logic, validation, testing)
+  - Test additions: ~1 person-day (unit/functional/edge)
+- **Runtime:**
+  - Minor overhead for metadata join (left join on tile_id)
+  - Low impact for small metadata table; negligible for large clusters
+  - Added assertion and logging: negligible runtime cost
+- **Maintenance:**
+  - Inline documentation and deprecated code block aid future maintenance
+  - Schema assertion reduces risk of silent errors
 
----
+**Justification:**
+- Enrichment with tile_category directly supports business reporting requirements (SCRUM-7567)
+- Schema validation and explicit error handling improve reliability and maintainability
+- Logging and documentation enhance auditability
+- Changes are backward compatible (old logic deprecated, not removed)
 
-## Ready-to-Run Output
-- **home_tile_reporting_etl_Pipeline.py**: Fully self-contained ETL pipeline with all delta modifications, annotations, and sample data.
-- **home_tile_reporting_etl_Test.py**: Python script for insert/update scenarios, outputs markdown report with results.
-
----
-
-**No Azure or GCP code included. All changes are documented inline and in the header.**
-
----
-
-For full code, see:
-- Output/home_tile_reporting_etl_Pipeline.py
-- Output/home_tile_reporting_etl_Test.py
+==================================================

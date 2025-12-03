@@ -1,267 +1,260 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Technical specification for adding SOURCE_TILE_METADATA table and extending target reporting with tile category enrichment
+Description: Technical specification for Home Tile Reporting ETL enhancement with SOURCE_TILE_METADATA integration
 =============================================
 
-# Technical Specification for Home Tile Reporting Enhancement - Tile Metadata Integration
+# Technical Specification for Home Tile Reporting Enhancement
 
 ## Introduction
 
-### Business Context
-This enhancement addresses the business requirement to enrich home tile reporting with metadata categorization. The current ETL pipeline aggregates tile metrics at the tile_id level without business grouping. Product Analytics has requested the addition of tile-level metadata to enable category-based reporting and performance tracking.
+### Purpose
+This technical specification outlines the enhancement to the existing Home Tile Reporting ETL pipeline to integrate the new `SOURCE_TILE_METADATA` table. The enhancement will enrich the reporting capabilities by adding tile metadata information to the existing aggregated metrics.
 
-### Enhancement Scope
-- Add new source table `SOURCE_TILE_METADATA` for tile categorization
-- Extend existing ETL pipeline to incorporate metadata enrichment
-- Update target table schema to include `tile_category` column
-- Maintain backward compatibility and data integrity
+### Scope
+The enhancement includes:
+- Integration of `SOURCE_TILE_METADATA` table into the existing ETL pipeline
+- Updates to data models to include tile metadata fields
+- Enhanced source-to-target mapping with metadata enrichment
+- Code modifications to support the new data source
 
-### Business Benefits
-- Enable performance metrics by functional category (Offers, Health Checks, Payments)
-- Support category-level CTR comparisons
-- Improve dashboard drilldowns and business insights
-- Enable future tile segmentation capabilities
+### Business Requirements
+- Enrich home tile reporting with business categorization
+- Provide tile name and category information in daily summaries
+- Enable filtering and grouping by tile categories in reports
+- Maintain backward compatibility with existing reporting structure
 
 ## Code Changes
 
-### 1. ETL Pipeline Modifications (`home_tile_reporting_etl.py`)
+### 1. Configuration Updates
 
-#### 1.1 Configuration Updates
+**File:** `home_tile_reporting_etl.py`
+
+**Changes Required:**
 ```python
 # Add new source table configuration
 SOURCE_TILE_METADATA = "analytics_db.SOURCE_TILE_METADATA"
 ```
 
-#### 1.2 Source Data Reading
+### 2. Data Reading Logic Enhancement
+
+**Location:** Read Source Tables section
+
+**Current Code:**
 ```python
-# Add metadata table reading
-df_metadata = (
-    spark.table(SOURCE_TILE_METADATA)
-    .filter(F.col("is_active") == True)
-    .select("tile_id", "tile_name", "tile_category")
+df_tile = (
+    spark.table(SOURCE_HOME_TILE_EVENTS)
+    .filter(F.to_date("event_ts") == PROCESS_DATE)
 )
 ```
 
-#### 1.3 Daily Summary Aggregation Enhancement
+**Enhanced Code:**
 ```python
-# Modified daily summary with metadata join
-df_daily_summary_enriched = (
-    df_daily_summary
+# Read tile metadata
+df_metadata = spark.table(SOURCE_TILE_METADATA).filter(F.col("is_active") == True)
+
+# Enhanced tile events with metadata join
+df_tile = (
+    spark.table(SOURCE_HOME_TILE_EVENTS)
+    .filter(F.to_date("event_ts") == PROCESS_DATE)
     .join(df_metadata, "tile_id", "left")
-    .withColumn(
-        "tile_category", 
-        F.coalesce(F.col("tile_category"), F.lit("UNKNOWN"))
+)
+
+# Enhanced interstitial events with metadata join
+df_inter = (
+    spark.table(SOURCE_INTERSTITIAL_EVENTS)
+    .filter(F.to_date("event_ts") == PROCESS_DATE)
+    .join(df_metadata, "tile_id", "left")
+)
+```
+
+### 3. Aggregation Logic Updates
+
+**Location:** Daily Tile Summary Aggregation section
+
+**Enhanced Aggregation:**
+```python
+df_tile_agg = (
+    df_tile.groupBy("tile_id", "tile_name", "tile_category")
+    .agg(
+        F.countDistinct(F.when(F.col("event_type") == "TILE_VIEW", F.col("user_id"))).alias("unique_tile_views"),
+        F.countDistinct(F.when(F.col("event_type") == "TILE_CLICK", F.col("user_id"))).alias("unique_tile_clicks")
     )
-    .withColumn(
-        "tile_name", 
-        F.coalesce(F.col("tile_name"), F.lit("Unknown Tile"))
+)
+
+df_inter_agg = (
+    df_inter.groupBy("tile_id", "tile_name", "tile_category")
+    .agg(
+        F.countDistinct(F.when(F.col("interstitial_view_flag") == True, F.col("user_id"))).alias("unique_interstitial_views"),
+        F.countDistinct(F.when(F.col("primary_button_click_flag") == True, F.col("user_id"))).alias("unique_interstitial_primary_clicks"),
+        F.countDistinct(F.when(F.col("secondary_button_click_flag") == True, F.col("user_id"))).alias("unique_interstitial_secondary_clicks")
     )
+)
+```
+
+### 4. Final Selection Enhancement
+
+**Enhanced Daily Summary:**
+```python
+df_daily_summary = (
+    df_tile_agg.join(df_inter_agg, ["tile_id", "tile_name", "tile_category"], "outer")
+    .withColumn("date", F.lit(PROCESS_DATE))
     .select(
         "date",
         "tile_id",
         "tile_name",
         "tile_category",
-        "unique_tile_views",
-        "unique_tile_clicks",
-        "unique_interstitial_views",
-        "unique_interstitial_primary_clicks",
-        "unique_interstitial_secondary_clicks"
+        F.coalesce("unique_tile_views", F.lit(0)).alias("unique_tile_views"),
+        F.coalesce("unique_tile_clicks", F.lit(0)).alias("unique_tile_clicks"),
+        F.coalesce("unique_interstitial_views", F.lit(0)).alias("unique_interstitial_views"),
+        F.coalesce("unique_interstitial_primary_clicks", F.lit(0)).alias("unique_interstitial_primary_clicks"),
+        F.coalesce("unique_interstitial_secondary_clicks", F.lit(0)).alias("unique_interstitial_secondary_clicks")
     )
 )
 ```
 
-#### 1.4 Error Handling and Validation
-```python
-# Add validation for metadata table availability
-def validate_metadata_table():
-    try:
-        metadata_count = spark.table(SOURCE_TILE_METADATA).count()
-        print(f"Metadata table contains {metadata_count} records")
-        return True
-    except Exception as e:
-        print(f"Warning: Metadata table not available: {e}")
-        return False
-
-# Call validation before processing
-metadata_available = validate_metadata_table()
-```
-
-### 2. Target Table Write Logic Updates
-```python
-# Update overwrite function to handle new schema
-overwrite_partition(df_daily_summary_enriched, TARGET_DAILY_SUMMARY)
-```
-
 ## Data Model Updates
 
-### 1. New Source Table: `SOURCE_TILE_METADATA`
+### 1. Source Data Model Changes
 
-**Table Structure:**
+**New Source Table:** `analytics_db.SOURCE_TILE_METADATA`
+- **Purpose:** Master data for tile metadata and business categorization
+- **Key Fields:** tile_id, tile_name, tile_category, is_active, updated_ts
+- **Relationship:** One-to-many with SOURCE_HOME_TILE_EVENTS and SOURCE_INTERSTITIAL_EVENTS
+
+### 2. Target Data Model Updates
+
+**Enhanced Target Table:** `reporting_db.TARGET_HOME_TILE_DAILY_SUMMARY`
+
+**Required DDL Changes:**
 ```sql
-CREATE TABLE IF NOT EXISTS analytics_db.SOURCE_TILE_METADATA 
-(
-    tile_id        STRING    COMMENT 'Tile identifier',
-    tile_name      STRING    COMMENT 'User-friendly tile name',
-    tile_category  STRING    COMMENT 'Business or functional category of tile',
-    is_active      BOOLEAN   COMMENT 'Indicates if tile is currently active',
-    updated_ts     TIMESTAMP COMMENT 'Last update timestamp'
-)
-USING DELTA
-COMMENT 'Master metadata for homepage tiles, used for business categorization and reporting enrichment';
+ALTER TABLE reporting_db.TARGET_HOME_TILE_DAILY_SUMMARY 
+ADD COLUMNS (
+    tile_name STRING COMMENT 'User-friendly tile name from metadata',
+    tile_category STRING COMMENT 'Business category of the tile'
+);
 ```
 
-**Sample Data:**
-| tile_id | tile_name | tile_category | is_active | updated_ts |
-|---------|-----------|---------------|-----------|------------|
-| TILE_001 | Credit Score Check | Personal Finance | true | 2025-12-01 |
-| TILE_002 | Health Assessment | Health & Wellness | true | 2025-12-01 |
-| TILE_003 | Payment Options | Payments | true | 2025-12-01 |
+**Updated Target Schema:**
+- date (DATE) - Reporting date
+- tile_id (STRING) - Tile identifier
+- **tile_name (STRING)** - *New field from metadata*
+- **tile_category (STRING)** - *New field from metadata*
+- unique_tile_views (LONG) - Distinct users who viewed the tile
+- unique_tile_clicks (LONG) - Distinct users who clicked the tile
+- unique_interstitial_views (LONG) - Distinct users who viewed interstitial
+- unique_interstitial_primary_clicks (LONG) - Distinct users who clicked primary button
+- unique_interstitial_secondary_clicks (LONG) - Distinct users who clicked secondary button
 
-### 2. Updated Target Table: `TARGET_HOME_TILE_DAILY_SUMMARY`
+### 3. Data Relationships
 
-**Enhanced Schema:**
-```sql
-CREATE TABLE IF NOT EXISTS reporting_db.TARGET_HOME_TILE_DAILY_SUMMARY 
-(
-    date                                DATE       COMMENT 'Reporting date',
-    tile_id                             STRING     COMMENT 'Tile identifier',
-    tile_name                           STRING     COMMENT 'User-friendly tile name',
-    tile_category                       STRING     COMMENT 'Functional category of the tile',
-    unique_tile_views                   LONG       COMMENT 'Distinct users who viewed the tile',
-    unique_tile_clicks                  LONG       COMMENT 'Distinct users who clicked the tile',
-    unique_interstitial_views           LONG       COMMENT 'Distinct users who viewed interstitial',
-    unique_interstitial_primary_clicks  LONG       COMMENT 'Distinct users who clicked primary button',
-    unique_interstitial_secondary_clicks LONG      COMMENT 'Distinct users who clicked secondary button'
-)
-USING DELTA
-PARTITIONED BY (date)
-COMMENT 'Daily aggregated tile-level metrics with metadata enrichment for reporting';
 ```
-
-**Schema Changes:**
-- **Added:** `tile_name STRING` - User-friendly tile name from metadata
-- **Added:** `tile_category STRING` - Business category for grouping and analysis
-
-### 3. Data Lineage Impact
-
-**New Data Flow:**
-```
-SOURCE_HOME_TILE_EVENTS ──┐
-                          ├─► ETL Pipeline ─► TARGET_HOME_TILE_DAILY_SUMMARY
-SOURCE_INTERSTITIAL_EVENTS ┤                    (Enhanced with metadata)
-                          │
-SOURCE_TILE_METADATA ─────┘
+SOURCE_TILE_METADATA (1) ----< SOURCE_HOME_TILE_EVENTS (M)
+SOURCE_TILE_METADATA (1) ----< SOURCE_INTERSTITIAL_EVENTS (M)
 ```
 
 ## Source-to-Target Mapping
 
-### 1. Enhanced Daily Summary Mapping
+### Enhanced Mapping Table
 
-| Source Field | Source Table | Target Field | Transformation Rule | Data Type |
-|--------------|--------------|--------------|-------------------|----------|
-| event_ts | SOURCE_HOME_TILE_EVENTS | date | `to_date(event_ts)` | DATE |
-| tile_id | SOURCE_HOME_TILE_EVENTS | tile_id | Direct mapping | STRING |
-| tile_name | SOURCE_TILE_METADATA | tile_name | `COALESCE(tile_name, 'Unknown Tile')` | STRING |
-| tile_category | SOURCE_TILE_METADATA | tile_category | `COALESCE(tile_category, 'UNKNOWN')` | STRING |
-| user_id | SOURCE_HOME_TILE_EVENTS | unique_tile_views | `COUNT(DISTINCT user_id) WHERE event_type = 'TILE_VIEW'` | LONG |
-| user_id | SOURCE_HOME_TILE_EVENTS | unique_tile_clicks | `COUNT(DISTINCT user_id) WHERE event_type = 'TILE_CLICK'` | LONG |
-| user_id | SOURCE_INTERSTITIAL_EVENTS | unique_interstitial_views | `COUNT(DISTINCT user_id) WHERE interstitial_view_flag = true` | LONG |
-| user_id | SOURCE_INTERSTITIAL_EVENTS | unique_interstitial_primary_clicks | `COUNT(DISTINCT user_id) WHERE primary_button_click_flag = true` | LONG |
-| user_id | SOURCE_INTERSTITIAL_EVENTS | unique_interstitial_secondary_clicks | `COUNT(DISTINCT user_id) WHERE secondary_button_click_flag = true` | LONG |
+| Source Table | Source Field | Target Table | Target Field | Transformation Rule | Data Type | Comments |
+|--------------|--------------|--------------|--------------|-------------------|-----------|----------|
+| SOURCE_HOME_TILE_EVENTS | event_ts | TARGET_HOME_TILE_DAILY_SUMMARY | date | DATE(event_ts) | DATE | Extract date from timestamp |
+| SOURCE_HOME_TILE_EVENTS | tile_id | TARGET_HOME_TILE_DAILY_SUMMARY | tile_id | Direct mapping | STRING | Primary key for aggregation |
+| **SOURCE_TILE_METADATA** | **tile_name** | **TARGET_HOME_TILE_DAILY_SUMMARY** | **tile_name** | **Direct mapping via LEFT JOIN** | **STRING** | **New enrichment field** |
+| **SOURCE_TILE_METADATA** | **tile_category** | **TARGET_HOME_TILE_DAILY_SUMMARY** | **tile_category** | **Direct mapping via LEFT JOIN** | **STRING** | **New enrichment field** |
+| SOURCE_HOME_TILE_EVENTS | user_id | TARGET_HOME_TILE_DAILY_SUMMARY | unique_tile_views | COUNT(DISTINCT user_id) WHERE event_type='TILE_VIEW' | LONG | Aggregated metric |
+| SOURCE_HOME_TILE_EVENTS | user_id | TARGET_HOME_TILE_DAILY_SUMMARY | unique_tile_clicks | COUNT(DISTINCT user_id) WHERE event_type='TILE_CLICK' | LONG | Aggregated metric |
+| SOURCE_INTERSTITIAL_EVENTS | user_id | TARGET_HOME_TILE_DAILY_SUMMARY | unique_interstitial_views | COUNT(DISTINCT user_id) WHERE interstitial_view_flag=true | LONG | Aggregated metric |
+| SOURCE_INTERSTITIAL_EVENTS | user_id | TARGET_HOME_TILE_DAILY_SUMMARY | unique_interstitial_primary_clicks | COUNT(DISTINCT user_id) WHERE primary_button_click_flag=true | LONG | Aggregated metric |
+| SOURCE_INTERSTITIAL_EVENTS | user_id | TARGET_HOME_TILE_DAILY_SUMMARY | unique_interstitial_secondary_clicks | COUNT(DISTINCT user_id) WHERE secondary_button_click_flag=true | LONG | Aggregated metric |
 
-### 2. Join Logic
+### Transformation Rules
 
-**Primary Join:**
+#### 1. Metadata Enrichment Rule
 ```sql
-LEFT JOIN SOURCE_TILE_METADATA metadata 
-    ON events.tile_id = metadata.tile_id 
-    AND metadata.is_active = true
+LEFT JOIN SOURCE_TILE_METADATA m ON events.tile_id = m.tile_id AND m.is_active = true
 ```
 
-**Null Handling:**
-- `tile_category`: Default to "UNKNOWN" when no metadata exists
-- `tile_name`: Default to "Unknown Tile" when no metadata exists
-- Ensures backward compatibility for existing tiles without metadata
+#### 2. Date Partitioning Rule
+```sql
+WHERE DATE(event_ts) = '${PROCESS_DATE}'
+```
 
-### 3. Business Rules
+#### 3. Aggregation Rules
+- **Unique Views:** `COUNT(DISTINCT CASE WHEN event_type = 'TILE_VIEW' THEN user_id END)`
+- **Unique Clicks:** `COUNT(DISTINCT CASE WHEN event_type = 'TILE_CLICK' THEN user_id END)`
+- **Interstitial Metrics:** `COUNT(DISTINCT CASE WHEN flag = true THEN user_id END)`
 
-| Rule ID | Description | Implementation |
-|---------|-------------|----------------|
-| BR001 | Only active tiles from metadata should be used | `WHERE is_active = true` |
-| BR002 | Missing metadata should not break pipeline | `LEFT JOIN` with `COALESCE` defaults |
-| BR003 | Historical data compatibility | Existing tiles get "UNKNOWN" category |
-| BR004 | Date partitioning maintained | `PARTITIONED BY (date)` preserved |
+#### 4. Null Handling Rule
+```sql
+COALESCE(aggregated_value, 0) -- Replace NULL with 0 for all metrics
+```
+
+### Global KPIs Enhancement
+
+**Additional Category-Level KPIs:**
+```python
+df_category_kpis = (
+    df_daily_summary.groupBy("date", "tile_category")
+    .agg(
+        F.sum("unique_tile_views").alias("category_tile_views"),
+        F.sum("unique_tile_clicks").alias("category_tile_clicks"),
+        F.sum("unique_interstitial_views").alias("category_interstitial_views")
+    )
+    .withColumn(
+        "category_ctr",
+        F.when(F.col("category_tile_views") > 0,
+               F.col("category_tile_clicks") / F.col("category_tile_views")).otherwise(0.0)
+    )
+)
+```
 
 ## Assumptions and Constraints
 
 ### Assumptions
-1. **Metadata Availability**: SOURCE_TILE_METADATA table will be populated before ETL execution
-2. **Data Quality**: tile_id in metadata table matches tile_id in event tables
-3. **Performance**: LEFT JOIN on tile_id will not significantly impact ETL performance
-4. **Backward Compatibility**: Existing dashboards can handle new columns
-5. **Data Governance**: Metadata table will be maintained by Product team
+1. **Data Quality:** SOURCE_TILE_METADATA contains valid and up-to-date tile information
+2. **Referential Integrity:** All tile_ids in event tables exist in metadata table
+3. **Performance:** LEFT JOIN with metadata table will not significantly impact ETL performance
+4. **Business Logic:** Only active tiles (is_active = true) should be considered for reporting
+5. **Backward Compatibility:** Existing reports and dashboards can handle additional fields
 
 ### Constraints
-1. **Schema Evolution**: Target table schema change requires coordinated deployment
-2. **Historical Data**: No backfill of historical data with categories (out of scope)
-3. **Global KPIs**: No changes to TARGET_HOME_TILE_GLOBAL_KPIS table
-4. **Dashboard Updates**: BI team responsible for dashboard modifications
-5. **Data Retention**: Metadata table follows same retention policy as source tables
+1. **Data Availability:** Metadata table must be populated before ETL execution
+2. **Schema Evolution:** Target table schema changes require coordination with downstream consumers
+3. **Processing Window:** Enhanced ETL should complete within existing SLA windows
+4. **Storage Impact:** Additional fields will increase storage requirements for target tables
+5. **Memory Usage:** JOIN operations may require additional Spark cluster resources
 
 ### Technical Constraints
-1. **Delta Lake Compatibility**: All tables must use Delta format
-2. **Partition Strategy**: Date-based partitioning maintained for performance
-3. **Idempotency**: ETL must support reprocessing without data duplication
-4. **Error Handling**: Pipeline should gracefully handle missing metadata
-
-## Implementation Plan
-
-### Phase 1: Infrastructure Setup
-1. Create SOURCE_TILE_METADATA table in analytics_db
-2. Insert initial metadata records
-3. Update table permissions and access controls
-
-### Phase 2: ETL Enhancement
-1. Modify home_tile_reporting_etl.py with metadata integration
-2. Update TARGET_HOME_TILE_DAILY_SUMMARY schema
-3. Implement error handling and validation
-
-### Phase 3: Testing and Validation
-1. Unit testing for metadata join logic
-2. Integration testing with sample data
-3. Performance testing with production data volumes
-4. Backward compatibility validation
-
-### Phase 4: Deployment
-1. Deploy schema changes to target table
-2. Deploy updated ETL pipeline
-3. Monitor initial runs for data quality
-4. Coordinate with BI team for dashboard updates
+1. **Spark Configuration:** May need to adjust spark.sql.adaptive.coalescePartitions.enabled for optimal performance
+2. **Delta Lake:** Ensure Delta Lake version supports schema evolution for target tables
+3. **Partitioning:** Maintain existing date-based partitioning strategy
+4. **Idempotency:** Enhanced pipeline must maintain idempotent behavior for reprocessing
 
 ## References
 
-### JIRA Stories
-- **SCRUM-7567**: Add New Source Table SOURCE_TILE_METADATA and Extend Target Reporting Metrics
+### Source Files
+1. **ETL Pipeline:** `Input/home_tile_reporting_etl.py`
+2. **Source DDL:** `Input/SourceDDL.sql`
+3. **Target DDL:** `Input/TargetDDL.sql`
+4. **Metadata DDL:** `Input/SOURCE_TILE_METADATA.sql`
 
-### Technical Documentation
-- **Source Code**: `Input/home_tile_reporting_etl.py`
-- **Source DDL**: `Input/SourceDDL.sql`
-- **Target DDL**: `Input/TargetDDL.sql`
-- **Metadata DDL**: `Input/SOURCE_TILE_METADATA.sql`
+### Technical Dependencies
+1. **Apache Spark:** Version 3.x with Delta Lake support
+2. **PySpark:** Compatible version with Spark cluster
+3. **Delta Lake:** For ACID transactions and schema evolution
+4. **Databricks Runtime:** Recommended for production deployment
 
-### Data Lineage
-- **Source Tables**: analytics_db.SOURCE_HOME_TILE_EVENTS, analytics_db.SOURCE_INTERSTITIAL_EVENTS, analytics_db.SOURCE_TILE_METADATA
-- **Target Tables**: reporting_db.TARGET_HOME_TILE_DAILY_SUMMARY, reporting_db.TARGET_HOME_TILE_GLOBAL_KPIS
-
-### Business Stakeholders
-- **Product Analytics Team**: Requirements and acceptance criteria
-- **BI Team**: Dashboard integration and visualization
-- **Data Engineering Team**: Implementation and maintenance
+### Business Dependencies
+1. **Metadata Management:** Process for maintaining tile metadata
+2. **Data Governance:** Approval for schema changes to target tables
+3. **Reporting Tools:** Updates to downstream BI tools and dashboards
+4. **Documentation:** User guides for new reporting capabilities
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2025-12-03  
-**Review Status**: Draft  
-**Approval Required**: Technical Lead, Product Owner
+**Document Version:** 1.0  
+**Last Updated:** 2025-12-02  
+**Next Review Date:** 2025-12-16  
+**Approval Status:** Pending Review

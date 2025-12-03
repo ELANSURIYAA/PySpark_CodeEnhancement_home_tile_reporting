@@ -1,61 +1,86 @@
 ==================================================
 Author: Ascendion AAVA
 Date: 
-Description: PySpark ETL pipeline code review – Home Tile Reporting with tile category enrichment
+Description: PySpark ETL pipeline enhancement review – tile metadata enrichment, code structure, and quality analysis
 ==================================================
 
 ## Summary of changes
 
-### File: Input/home_tile_reporting_etl.py → MODIFIED (see context for updated code)
+**File:** Input/home_tile_reporting_etl.py → home_tile_reporting_etl_Pipeline.py
 
-#### List of Deviations
-| Line/Section | Type         | Description |
-|--------------|-------------|-------------|
-| CONFIG       | Structural  | Added new source: SOURCE_TILE_METADATA for tile metadata enrichment |
-| READ SOURCES | Structural  | Added reading of tile metadata table with is_active filter |
-| AGGREGATION  | Semantic    | Changed join: daily summary now joins tile/interstitial events with metadata to add tile_category |
-| AGGREGATION  | Semantic    | tile_category column added to output; defaults to 'UNKNOWN' if no mapping |
-| SCHEMA       | Quality     | Schema validation: asserts presence of new column tile_category |
-| LOGIC        | Semantic    | Backward compatibility: tiles with no metadata are reported as 'UNKNOWN' |
-| LOGIC        | Quality     | Prints warning if any tiles lack metadata |
-| WRITE        | Structural  | No change in write logic, but output schema now includes tile_category |
-| GLOBAL KPIs  | Semantic    | No change (requirements confirmed) |
-| DEPRECATED   | Structural  | Old summary join code commented out and replaced |
+### 1. Structural Changes
+- **[ADDED] Source Table:** `SOURCE_TILE_METADATA` introduced for tile metadata enrichment (Line ~28)
+- **[ADDED] Read Metadata:** `df_metadata = spark.table(SOURCE_TILE_METADATA).filter(F.col("is_active") == True)` (Line ~49)
+- **[ADDED] Join:** Daily summary aggregation now joins metadata (`tile_id`, `tile_category`) (Line ~83)
+- **[ADDED] Column:** `tile_category` column added to daily summary output (Line ~88)
+- **[MODIFIED] SparkSession:** Now supports `SparkSession.getActiveSession()` for Spark Connect compatibility (Line ~37)
+- **[DEPRECATED]** Old join logic (without metadata enrichment) commented out (Line ~79)
 
-#### Categorization of Changes
-| Change Type    | Severity      | Details |
-|----------------|--------------|---------|
-| Structural     | High         | New source table, new join, new column in output schema |
-| Semantic       | High         | Business logic shift: enrichment with tile_category, handling unknowns |
-| Quality        | Medium       | Schema validation, warning for missing metadata, improved logging |
+### 2. Semantic Changes
+- **[ADDED] Default/Null Handling:** `tile_category` defaults to "UNKNOWN" if no metadata mapping (Line ~88)
+- **[ADDED] Validation:** Prints count of active metadata records loaded and warns if any tiles have `tile_category = "UNKNOWN"` (Lines ~51, ~92)
+- **[ADDED] Schema Validation:** Checks that output DataFrame contains new `tile_category` column (Line ~96)
+- **[MODIFIED] Aggregation Contract:** Output schema now includes `tile_category` for each tile, changing downstream contract for consumers of daily summary
+- **[UNCHANGED] Global KPIs:** No changes to global KPI calculations (Lines ~101-117)
 
-### Additional Optimization Suggestions
-- Consider parameterizing PROCESS_DATE to accept runtime arguments for production scheduling.
-- Metadata join can be enhanced to support SCD (Slowly Changing Dimension) if future requirements expand.
-- Logging can be replaced with a structured logger for better observability in production.
-- If tile metadata is large, consider caching or broadcasting for join performance.
-- Add unit tests for edge cases (already provided in context).
-
-||||||
-
-## Cost Estimation and Justification
-
-- Developer review effort: ~30 minutes per major change (structural/semantic)
-- Automated review agent: <1 minute per run
-- Maintenance cost: Low (changes modular, clearly documented)
-- Value: High (prevents regression, ensures business logic correctness)
-- Estimated developer effort for enrichment feature: 2-3 hours (including test coverage)
-
-## Summary Table
-| Change Area         | Initial Version | Updated Version | Impact |
-|---------------------|----------------|----------------|--------|
-| Source tables       | 2              | 3              | More complete data, enrichment |
-| Output columns      | 7              | 8              | tile_category added |
-| Join logic          | Simple outer   | Outer + left   | Enriched with metadata |
-| Error handling      | None           | Default + warn | More robust |
-| Schema validation   | None           | Assert         | Safer writes |
-| Logging             | Basic print    | Print + warn   | More visibility |
+### 3. Quality & Robustness
+- **[ADDED] Defensive Programming:** Assertion for schema validation (Line ~96)
+- **[ADDED] Logging:** Print statements for metadata load and enrichment warnings (Lines ~51, ~92)
+- **[MODIFIED] Partition Overwrite:** No change, but functionally validated for idempotency
+- **[ADDED] Test Coverage:** Python and PyTest scripts provided for enrichment, aggregation, error handling, and edge cases
 
 ---
 
-This review covers structural, semantic, and quality changes for the Home Tile Reporting ETL pipeline, focusing on tile category enrichment and business logic improvements. All major transformation contracts, schema validations, and edge-case handling are present and validated. See context for full test suite and additional recommendations.
+## List of Deviations (with file, line, type)
+
+| File                                 | Line(s) | Type        | Description                                                      | Severity |
+|--------------------------------------|---------|-------------|------------------------------------------------------------------|----------|
+| home_tile_reporting_etl_Pipeline.py  | ~28     | Structural  | Added SOURCE_TILE_METADATA source table                          | High     |
+| home_tile_reporting_etl_Pipeline.py  | ~49     | Structural  | Added df_metadata read and active filter                        | High     |
+| home_tile_reporting_etl_Pipeline.py  | ~83     | Structural  | Join daily summary with metadata for tile_category              | High     |
+| home_tile_reporting_etl_Pipeline.py  | ~88     | Semantic    | tile_category defaults to 'UNKNOWN' if not found                | Medium   |
+| home_tile_reporting_etl_Pipeline.py  | ~51,92  | Quality     | Print/logging for metadata load and unmapped tiles              | Low      |
+| home_tile_reporting_etl_Pipeline.py  | ~96     | Quality     | Assertion for schema validation                                 | Medium   |
+| home_tile_reporting_etl_Pipeline.py  | ~79     | Structural  | Deprecated: old join logic without enrichment                   | Low      |
+| home_tile_reporting_etl_Pipeline.py  | ~37     | Structural  | SparkSession.getActiveSession() for compatibility               | Low      |
+
+---
+
+## Categorization of Changes
+- **Structural:** Addition of metadata source, enrichment join, new output column, SparkSession compatibility
+- **Semantic:** Logic for enrichment, default value handling, downstream contract change (output schema)
+- **Quality:** Logging, validation, assertion for schema, improved error handling
+
+Severity: Most changes are **High** as they alter the ETL contract and core logic. Quality improvements are Medium/Low but increase robustness.
+
+---
+
+## Additional Optimization Suggestions
+- **Parameterize process date:** Instead of hardcoding `PROCESS_DATE`, pass as an argument or environment variable for production scheduling.
+- **Metadata Caching:** If metadata is small, consider caching `df_metadata` for performance if used in multiple joins.
+- **Config-driven sources/targets:** Use config files or environment variables for table names to improve portability.
+- **Error Handling:** Replace print statements with logging framework for better observability in production.
+- **Unit Test Automation:** Integrate PyTest suite into CI pipeline for automated regression.
+- **Partition Pruning:** Ensure that all joins and filters leverage partition columns for Spark performance.
+- **Documentation:** Update downstream consumers about schema change (`tile_category` added).
+
+---
+
+## Cost Estimation and Justification
+- **Development Cost:**
+    - Metadata enrichment logic: ~2-3 dev days (analysis, coding, testing)
+    - Schema validation, defensive programming: ~1 dev day
+    - Test script creation: ~1 dev day
+    - Update documentation, downstream contract: ~0.5 dev day
+    - Total: ~4.5-5.5 dev days
+- **Runtime Cost:**
+    - Metadata join: Negligible if metadata table is small; may increase slightly for large tables (recommend broadcast join if applicable)
+    - Additional column: Minimal impact on storage and compute
+- **Justification:**
+    - Provides critical enrichment for analytics
+    - Improves robustness and error handling
+    - Reduces manual review time with automated validation and tests
+
+---
+
+**Review completed. All code changes are clearly documented, categorized, and validated. Downstream contract change (tile_category column) must be communicated.**

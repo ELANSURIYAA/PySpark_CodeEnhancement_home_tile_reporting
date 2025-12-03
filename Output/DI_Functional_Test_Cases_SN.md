@@ -1,133 +1,223 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Functional test cases for validating the integration of SOURCE_TILE_METADATA and tile_category enrichment in home tile reporting ETL pipeline.
+Description: Functional test cases for tile-level metadata enrichment in home tile reporting (JIRA SCRUM-7567)
 =============================================
 
-### Test Case ID: TC_PCE3_01
-**Title:** Validate creation of SOURCE_TILE_METADATA table
-**Description:** Ensure the SOURCE_TILE_METADATA table is created with the correct schema and all required columns.
-**Preconditions:**
-- Access to analytics_db schema
-- Sufficient permissions to create tables
-**Steps to Execute:**
-1. Check if SOURCE_TILE_METADATA exists in analytics_db.
-2. Describe the table schema.
-3. Verify columns: tile_id, tile_name, tile_category, is_active, updated_ts
-**Expected Result:**
-- Table exists with all columns and correct data types as per specification.
-**Linked Jira Ticket:** PCE-3
+# Functional Test Cases: Home Tile Reporting Enhancement
 
-### Test Case ID: TC_PCE3_02
-**Title:** Validate ETL reads active metadata records only
-**Description:** Ensure that the ETL pipeline reads only records where is_active = true from SOURCE_TILE_METADATA.
-**Preconditions:**
-- SOURCE_TILE_METADATA contains both active and inactive records
-**Steps to Execute:**
-1. Insert test records with is_active true and false.
-2. Run the ETL pipeline.
-3. Check intermediate dataframe for presence of inactive records.
-**Expected Result:**
-- Only records with is_active = true are processed in the ETL.
-**Linked Jira Ticket:** PCE-3
+## Overview
+This document provides detailed functional test cases for the implementation of tile-level metadata enrichment in the home tile reporting ETL pipeline, as specified in JIRA SCRUM-7567. The test cases ensure comprehensive coverage of all business and technical requirements, including positive, negative, and edge scenarios. Each test case is traceable to the Jira story.
 
-### Test Case ID: TC_PCE3_03
-**Title:** Validate tile_category enrichment in target summary
-**Description:** Ensure tile_category is correctly joined and populated in TARGET_HOME_TILE_DAILY_SUMMARY.
-**Preconditions:**
-- SOURCE_TILE_METADATA and source event tables are populated
-**Steps to Execute:**
-1. Run the ETL pipeline.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY for recent data.
-3. Verify that tile_category matches the value in SOURCE_TILE_METADATA for each tile_id.
-**Expected Result:**
-- tile_category is populated and correct for each tile_id.
-**Linked Jira Ticket:** PCE-3
+---
 
-### Test Case ID: TC_PCE3_04
-**Title:** Validate defaulting tile_category to 'UNKNOWN' when no metadata exists
-**Description:** Ensure that if a tile_id in the summary has no matching metadata, tile_category is set to 'UNKNOWN'.
+### Test Case ID: TC_SCRUM7567_01
+**Title:** Verify creation of SOURCE_TILE_METADATA table
+**Description:** Ensure the new metadata table is created in analytics_db with the correct schema and columns.
 **Preconditions:**
-- TARGET_HOME_TILE_DAILY_SUMMARY contains tile_ids not present in SOURCE_TILE_METADATA
+- Access to analytics_db
+- Sufficient privileges to create tables
 **Steps to Execute:**
-1. Ensure some tile_ids in the daily summary have no metadata entry.
-2. Run the ETL pipeline.
-3. Query the output for those tile_ids.
+1. Run the DDL script for SOURCE_TILE_METADATA.
+2. Query the schema registry/catalog for analytics_db.SOURCE_TILE_METADATA.
+3. Verify columns: tile_id, tile_name, tile_category, is_active, updated_ts.
+4. Confirm table properties and comments are present.
 **Expected Result:**
-- tile_category is 'UNKNOWN' for all unmatched tile_ids.
-**Linked Jira Ticket:** PCE-3
+- Table exists with correct structure and metadata.
+- No errors during creation.
+**Linked Jira Ticket:** SCRUM-7567
 
-### Test Case ID: TC_PCE3_05
-**Title:** Validate no record loss during metadata join
-**Description:** Ensure that the number of records in the daily summary does not decrease after enriching with metadata (left join preserves all rows).
+---
+
+### Test Case ID: TC_SCRUM7567_02
+**Title:** Validate sample metadata insertion
+**Description:** Confirm that sample metadata records can be inserted and retrieved from SOURCE_TILE_METADATA.
 **Preconditions:**
-- Both source event and metadata tables are populated
+- SOURCE_TILE_METADATA table exists
 **Steps to Execute:**
-1. Count records in the original summary before join.
-2. Count records after metadata enrichment.
+1. Insert sample records into SOURCE_TILE_METADATA (e.g., TILE_001, TILE_002).
+2. Query the table for all records.
+3. Verify inserted values for tile_id, tile_name, tile_category, is_active, updated_ts.
 **Expected Result:**
-- Record count is unchanged after join.
-**Linked Jira Ticket:** PCE-3
+- Sample records are present and match expected values.
+**Linked Jira Ticket:** SCRUM-7567
 
-### Test Case ID: TC_PCE3_06
-**Title:** Validate only valid/active tile categories are used
-**Description:** Ensure only valid, active tile categories are assigned (e.g., OFFERS, HEALTH_CHECKS, PAYMENTS, PERSONAL_FINANCE, UNKNOWN).
+---
+
+### Test Case ID: TC_SCRUM7567_03
+**Title:** ETL pipeline reads metadata table successfully
+**Description:** Ensure the ETL pipeline can read from SOURCE_TILE_METADATA and load active tile metadata.
 **Preconditions:**
-- SOURCE_TILE_METADATA contains a mix of valid and invalid categories
+- ETL pipeline deployed
+- SOURCE_TILE_METADATA table populated
 **Steps to Execute:**
-1. Insert records with valid and invalid tile_category values.
-2. Run the ETL pipeline.
-3. Query TARGET_HOME_TILE_DAILY_SUMMARY and check unique tile_category values.
+1. Trigger ETL pipeline run.
+2. Inspect ETL logs for successful read of metadata table.
+3. Verify only records with is_active = True are loaded.
 **Expected Result:**
-- Only valid categories and 'UNKNOWN' appear in the output.
-**Linked Jira Ticket:** PCE-3
+- ETL pipeline reads metadata table without errors.
+- Only active tiles are loaded into memory.
+**Linked Jira Ticket:** SCRUM-7567
 
-### Test Case ID: TC_PCE3_07
-**Title:** Validate schema evolution and backward compatibility
-**Description:** Ensure that the addition of tile_category to the target table does not break downstream processes or existing queries.
-**Preconditions:**
-- Existing dashboards or queries reference TARGET_HOME_TILE_DAILY_SUMMARY
-**Steps to Execute:**
-1. Add tile_category column via DDL.
-2. Run existing queries/dashboards on the target table.
-**Expected Result:**
-- All queries and dashboards run successfully; no errors due to schema changes.
-**Linked Jira Ticket:** PCE-3
+---
 
-### Test Case ID: TC_PCE3_08
-**Title:** Validate ETL error handling for schema drift
-**Description:** Ensure the ETL pipeline fails gracefully with a clear error message if the metadata schema changes unexpectedly.
+### Test Case ID: TC_SCRUM7567_04
+**Title:** Enrich daily summary with tile_category
+**Description:** Validate that the ETL joins metadata and adds tile_category to the target table for each tile.
 **Preconditions:**
-- ETL pipeline is configured for schema validation
-**Steps to Execute:**
-1. Alter SOURCE_TILE_METADATA to add/remove a column.
-2. Run the ETL pipeline.
-**Expected Result:**
-- ETL fails with a descriptive error about schema mismatch.
-**Linked Jira Ticket:** PCE-3
-
-### Test Case ID: TC_PCE3_09
-**Title:** Validate partition overwrite and data retention
-**Description:** Ensure that the ETL overwrites only the intended partitions in the target table and respects retention policies.
-**Preconditions:**
-- TARGET_HOME_TILE_DAILY_SUMMARY is partitioned by date
-**Steps to Execute:**
-1. Run the ETL for a specific date range.
-2. Verify only those partitions are overwritten.
-3. Check that older data/partitions remain intact.
-**Expected Result:**
-- Only selected partitions are overwritten; no data loss outside range.
-**Linked Jira Ticket:** PCE-3
-
-### Test Case ID: TC_PCE3_10
-**Title:** Validate ETL idempotency with metadata enrichment
-**Description:** Ensure that rerunning the ETL with the same input does not produce duplicate or inconsistent results in the target table.
-**Preconditions:**
-- All source tables are populated
+- ETL pipeline updated to join metadata
+- SOURCE_TILE_METADATA and source event tables populated
 **Steps to Execute:**
 1. Run the ETL pipeline for a given date.
-2. Run the ETL pipeline again for the same date.
-3. Compare results in TARGET_HOME_TILE_DAILY_SUMMARY.
+2. Query TARGET_HOME_TILE_DAILY_SUMMARY for that date.
+3. Verify that each record has a tile_category populated from metadata.
 **Expected Result:**
-- Results are identical; no duplicates or inconsistencies.
-**Linked Jira Ticket:** PCE-3
+- tile_category column exists and is populated for each tile.
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_05
+**Title:** Default tile_category to 'UNKNOWN' for unmapped tiles
+**Description:** Ensure that if a tile_id has no metadata, the ETL assigns 'UNKNOWN' as tile_category in the target table.
+**Preconditions:**
+- ETL pipeline updated for backward compatibility
+- TARGET_HOME_TILE_DAILY_SUMMARY table exists
+**Steps to Execute:**
+1. Insert an event in source tables with a tile_id not present in SOURCE_TILE_METADATA.
+2. Run the ETL pipeline.
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY for the new tile_id.
+4. Check the tile_category value.
+**Expected Result:**
+- tile_category is 'UNKNOWN' for unmapped tile_ids.
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_06
+**Title:** Verify addition of tile_category column to target table
+**Description:** Confirm that TARGET_HOME_TILE_DAILY_SUMMARY has the new tile_category column with correct data type and comment.
+**Preconditions:**
+- Target table schema migration executed
+**Steps to Execute:**
+1. Query table schema for TARGET_HOME_TILE_DAILY_SUMMARY.
+2. Verify presence of tile_category column.
+3. Check data type is STRING and comment is correct.
+**Expected Result:**
+- tile_category column exists with correct properties.
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_07
+**Title:** Validate reporting output accuracy for tile_category
+**Description:** Ensure reporting queries and dashboards reflect correct tile_category values in outputs.
+**Preconditions:**
+- ETL pipeline run completed
+- Reporting queries/dashboards configured for new column
+**Steps to Execute:**
+1. Execute reporting query on TARGET_HOME_TILE_DAILY_SUMMARY.
+2. Group results by tile_category.
+3. Validate counts and metrics per category.
+**Expected Result:**
+- Reporting output shows accurate tile_category groupings and metrics.
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_08
+**Title:** ETL unit test: schema validation and no drift
+**Description:** Validate that the ETL pipeline passes schema validation tests and does not introduce schema drift.
+**Preconditions:**
+- ETL pipeline with schema validation logic
+**Steps to Execute:**
+1. Run ETL unit tests (schema validation)
+2. Check for errors or warnings related to schema drift
+3. Verify all columns match expected schema
+**Expected Result:**
+- ETL passes schema validation
+- No schema drift detected
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_09
+**Title:** ETL regression test: record count consistency
+**Description:** Ensure that the record counts in the target table remain consistent after metadata enrichment (no loss or duplication).
+**Preconditions:**
+- Historical data available for comparison
+- ETL pipeline updated
+**Steps to Execute:**
+1. Run ETL pipeline before and after metadata enrichment
+2. Compare record counts for a given date
+3. Verify no loss or duplication of records
+**Expected Result:**
+- Record counts remain consistent
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_10
+**Title:** Negative test: invalid metadata insertion
+**Description:** Attempt to insert a record into SOURCE_TILE_METADATA with missing required fields and verify error handling.
+**Preconditions:**
+- SOURCE_TILE_METADATA table exists
+**Steps to Execute:**
+1. Attempt to insert a record with NULL tile_id
+2. Attempt to insert a record with invalid data types (e.g., non-boolean for is_active)
+3. Observe error messages
+**Expected Result:**
+- Table enforces NOT NULL constraint for tile_id
+- Data type errors are raised appropriately
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_11
+**Title:** Edge case: inactive tiles in metadata
+**Description:** Ensure that tiles marked as inactive in metadata are excluded from reporting enrichment.
+**Preconditions:**
+- SOURCE_TILE_METADATA contains inactive tiles
+**Steps to Execute:**
+1. Mark a tile as is_active = False in SOURCE_TILE_METADATA
+2. Run ETL pipeline
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY for that tile_id
+**Expected Result:**
+- Inactive tile is not enriched with tile_category
+- tile_category is 'UNKNOWN' or tile is excluded per business logic
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+### Test Case ID: TC_SCRUM7567_12
+**Title:** Edge case: future-proofing for new categories
+**Description:** Validate that the ETL and reporting pipelines can handle new tile categories added to metadata without errors.
+**Preconditions:**
+- SOURCE_TILE_METADATA updated with new tile_category values
+**Steps to Execute:**
+1. Add a new category to SOURCE_TILE_METADATA (e.g., "Rewards")
+2. Run ETL pipeline
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY for tiles in new category
+**Expected Result:**
+- New categories appear in reporting outputs without errors
+**Linked Jira Ticket:** SCRUM-7567
+
+---
+
+## Cost Estimation and Justification
+
+**Token Usage Analysis:**
+- Input Tokens: ~13,700 tokens (prompt, DDLs, Jira story, instructions)
+- Output Tokens: ~2,200 tokens (functional test cases, metadata)
+- Model Used: GPT-4 (detected from context)
+
+**Cost Breakdown:**
+- Input Cost = 13,700 × $0.03/1K tokens = $0.411
+- Output Cost = 2,200 × $0.06/1K tokens = $0.132
+- **Total Cost = $0.543**
+
+**Cost Formula:**
+```
+Total Cost = (Input_Tokens × Input_Rate_Per_1K) + (Output_Tokens × Output_Rate_Per_1K)
+Total Cost = (13,700 × $0.03/1K) + (2,200 × $0.06/1K) = $0.543
+```

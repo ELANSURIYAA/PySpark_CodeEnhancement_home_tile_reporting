@@ -1,73 +1,66 @@
 ==================================================
 Author: Ascendion AAVA
 Date: 
-Description: PySpark ETL code review – tile metadata enrichment, join, and reporting enhancements
+Description: PySpark ETL code review for home tile reporting enhancement per SCRUM-7567. Compares legacy and updated pipeline logic, annotates changes, and provides actionable feedback.
 ==================================================
 
 ## Summary of changes
 
-### Structural Changes
-- **File Renamed**: `home_tile_reporting_etl.py` → `home_tile_reporting_etl_Pipeline.py` (suggests major revision for pipeline clarity).
-- **Added Source Table**: `SOURCE_TILE_METADATA` introduced in updated code.
-- **New DataFrame**: `df_metadata` added for reading tile metadata.
-- **Join Logic Modified**: Outer join between tile/interstitial events now also left-joins with metadata.
-- **New Output Column**: `tile_category` added to daily summary output.
-- **Default Value Logic**: If metadata is missing for a tile, `tile_category` is set to "UNKNOWN".
-- **Commenting and Documentation**: Extensive inline annotations (`[ADDED]`, `[MODIFIED]`, `[DEPRECATED]`) for traceability.
-- **Metadata Header**: Change management header updated and version incremented to 1.1.0.
+### Files Compared
+- Input/home_tile_reporting_etl.py (Legacy)
+- home_tile_reporting_etl_Pipeline.py (Enhanced per SCRUM-7567)
 
-### Semantic Changes
-- **Reporting Enrichment**: Daily summary now includes `tile_category` for each tile, improving downstream analytics.
-- **Backward Compatibility**: Global KPI logic remains unchanged, ensuring legacy metric continuity.
-- **Idempotency**: Partition overwrite logic preserved and documented for daily loads.
-- **Test Coverage**: Added/updated test scripts and PyTest suite covering enrichment, joins, edge cases, and write API.
+### List of Deviations
 
-### Quality Changes
-- **Improved Observability**: Better documentation, inline comments, and change log for auditability.
-- **Test-Driven Development**: Unit and scenario-based tests, including PyTest and markdown output validation.
-- **Error Handling**: Explicit defaulting to "UNKNOWN" for missing metadata prevents null propagation in reports.
-- **Code Structure**: More modular, easier to maintain and extend due to clear separation of concerns.
+| File                               | Line(s)         | Type        | Description                                                                                          |
+|------------------------------------|-----------------|-------------|------------------------------------------------------------------------------------------------------|
+| home_tile_reporting_etl_Pipeline.py| 38-40           | Structural  | [ADDED] Introduction of SOURCE_TILE_METADATA table for tile category enrichment                      |
+| home_tile_reporting_etl_Pipeline.py| 51-55           | Structural  | [ADDED] Read and filter active tile metadata for enrichment                                          |
+| home_tile_reporting_etl_Pipeline.py| 81-97           | Semantic    | [MODIFIED] Join with metadata to add tile_category to daily summary, left join, default UNKNOWN      |
+| home_tile_reporting_etl_Pipeline.py| 99-108          | Quality     | [ADDED] Data quality validation for record count after metadata join                                 |
+| home_tile_reporting_etl_Pipeline.py| 126-128         | Quality     | [MODIFIED] Enhanced daily summary write includes tile_category                                       |
+| home_tile_reporting_etl_Pipeline.py| 129             | Semantic    | [UNCHANGED] Global KPIs logic remains identical                                                      |
+| home_tile_reporting_etl_Pipeline.py| Throughout      | Quality     | [MODIFIED] Improved documentation, change log, and inline comments for auditability                  |
 
-## List of deviations (file, line, type)
+### Categorization_Changes
 
-| File                                 | Line(s)     | Type         | Description                                                      |
-|--------------------------------------|-------------|--------------|------------------------------------------------------------------|
-| home_tile_reporting_etl_Pipeline.py  | 24-26       | Added        | `SOURCE_TILE_METADATA` config and usage                          |
-| home_tile_reporting_etl_Pipeline.py  | 38-41       | Added        | Reading metadata table, selecting `tile_id`, `tile_category`     |
-| home_tile_reporting_etl_Pipeline.py  | 54-62       | Modified     | Join logic: now outer joins tile/inter events, left joins metadata|
-| home_tile_reporting_etl_Pipeline.py  | 63          | Added        | `.withColumn('tile_category', ...)` to default missing metadata  |
-| home_tile_reporting_etl_Pipeline.py  | 65          | Added        | Selects `tile_category` in output                                |
-| home_tile_reporting_etl_Pipeline.py  | Header      | Modified     | Updated version, release, author, and description                |
-| home_tile_reporting_etl_Test.py      | All         | Added        | Test script for enrichment, update, and unknown category         |
-| PyTest test file (Output)            | All         | Added        | PyTest suite for full coverage (TC01–TC07)                      |
+#### Structural Changes
+- Addition of tile metadata source and enrichment logic (High severity: impacts reporting contract)
+- Additional DataFrame (`df_metadata`) and join operation
 
-## Categorization_Changes
+#### Semantic Changes
+- Daily summary now includes `tile_category` per tile, with fallback to 'UNKNOWN' (High severity: changes output schema)
+- Left join ensures all tiles are preserved; semantic guarantee for enrichment
 
-- **Structural**: High severity (new table, join logic, output columns, test coverage)
-- **Semantic**: Medium severity (enrichment logic, backward compatibility)
-- **Quality**: Medium severity (observability, error handling, documentation)
+#### Quality Changes
+- Data validation for record count post-join (Medium severity: prevents silent data loss)
+- Enhanced documentation and code comments (Low severity: improves maintainability)
 
-## Additional Optimization Suggestions
-
-- **Parameterize Process Date**: Accept `PROCESS_DATE` as argument for easier automation and scheduling.
-- **Schema Validation**: Add explicit schema checks for metadata to avoid silent errors if structure changes.
-- **Column Pruning**: Select only necessary columns early to reduce memory footprint.
-- **Performance**: Consider broadcast join for small metadata table to optimize join speed.
-- **Partitioning**: If tile metadata is large, partition or cache as needed for repeated ETL runs.
-- **Logging**: Add structured logging for join statistics (e.g., count of tiles with UNKNOWN category).
+### Additional Optimization Suggestions
+- Parameterize `PROCESS_DATE` for full pipeline automation (currently static)
+- Consider caching `df_metadata` if reused in multiple joins for performance
+- Add logging for validation and enrichment steps for operational monitoring
+- Unit test coverage is strong; consider data-driven tests for additional edge cases
+- Future: Make tile_category enrichment configurable (e.g., allow multiple category fields)
 
 ||||||
 
 ## Cost Estimation and Justification
-(Calculation steps remain unchanged)
 
-- Analysis, enrichment, and join logic: ~2 engineer hours.
-- Test script development and validation: ~1 engineer hour.
-- Documentation and annotation: ~0.5 engineer hour.
-- Total: **~3.5 engineer hours**.
+- **Development Effort:**
+    - Tile metadata enrichment logic: 2-3 hours (design, implementation, testing)
+    - Data validation logic: 1 hour
+    - Documentation and change log: 30 min
+    - Test script and unit tests: 2-3 hours
+- **Compute Impact:**
+    - Minor increase due to additional join (tile_category enrichment), mitigated by join type and small metadata size
+    - No change to aggregation complexity
+- **Maintenance Impact:**
+    - Improved auditability and error handling reduces future support cost
+    - Schema change requires downstream consumers to update expectations
+- **Justification:**
+    - Enhancement aligns with SCRUM-7567 requirements, provides richer reporting, and preserves legacy logic for audit
+    - All changes are backward compatible except output schema (tile_category addition)
+    - Data validation and error handling mitigate operational risks
 
-Justification: The delta update required careful join logic, backward compatibility, and robust test coverage for both enrichment and default behavior, as well as documentation updates.
-
----
-
-**This code review is now available in the Output folder as required and meets the criteria for structure, coverage, and documentation.**
+==================================================

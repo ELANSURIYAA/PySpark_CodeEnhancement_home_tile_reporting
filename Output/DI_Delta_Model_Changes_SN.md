@@ -1,10 +1,10 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Data Model Evolution Package for Home Tile Reporting Enhancement with Metadata Integration
+Description: Data Model Evolution Package for Home Tile Reporting Enhancement with metadata integration
 =============================================
 
-# Data Model Evolution Package
+# Data Model Evolution Package (DMEA)
 ## Home Tile Reporting Enhancement - Metadata Integration
 
 ---
@@ -13,12 +13,12 @@ Description: Data Model Evolution Package for Home Tile Reporting Enhancement wi
 
 ### Overview of Changes
 **Impact Level**: MEDIUM
-**Change Type**: Schema Enhancement with New Table Addition
-**Business Justification**: Enable category-level analytics and improved dashboard reporting capabilities
+**Change Type**: Schema Extension with New Table Integration
+**Business Driver**: Enable category-level performance tracking and enhanced reporting capabilities
 
-### Change Categories
+### Summary of Modifications
 
-#### **Additions**
+#### ✅ Additions
 - **New Source Table**: `analytics_db.SOURCE_TILE_METADATA`
-  - Purpose: Master metadata for homepage tiles with business categorization
+  - Purpose: Master metadata for homepage tiles business categorization
   - Fields: tile_id

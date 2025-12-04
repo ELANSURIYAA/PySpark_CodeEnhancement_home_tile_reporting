@@ -1,25 +1,29 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Data Model Evolution Package for Home Tile Reporting ETL enhancement with metadata integration
+Description: Data Model Evolution Package for SOURCE_TILE_METADATA integration and TARGET_HOME_TILE_DAILY_SUMMARY schema enhancement
 =============================================
 
-# Data Model Evolution Package - Home Tile Reporting Enhancement
+# Data Model Evolution Package (DMEA)
+## Home Tile Reporting Enhancement - Delta Model Changes
+
+### Executive Summary
+This document outlines the data model evolution required to integrate the new `SOURCE_TILE_METADATA` table and extend the `TARGET_HOME_TILE_DAILY_SUMMARY` table with tile categorization capabilities as specified in JIRA story SCRUM-7819.
+
+---
 
 ## 1. Delta Summary Report
 
-### Overview of Changes
-**Impact Level:** MEDIUM
+### Change Overview
+| **Impact Level** | **HIGH** |
+|------------------|----------|
+| **Change Type**  | Schema Extension + New Table Addition |
+| **Risk Level**   | MEDIUM |
+| **Backward Compatibility** | MAINTAINED |
 
-**Change Summary:**
-- **New Table Addition:** SOURCE_TILE_METADATA table integration
-- **Target Schema Enhancement:** Addition of metadata fields to existing target tables
-- **New Target Table:** TARGET_HOME_TILE_CATEGORY_KPIS for category-wise analytics
-- **ETL Logic Enhancement:** Metadata enrichment and category-based aggregations
-
-### Detailed Change Analysis
+### Changes Detected
 
 #### **Additions**
-1. **New Source Table:**
-   - `analytics_db.SOURCE_TILE_METADATA`
-     - Fields: tile_id
+1. **New Table**: `analytics_db.SOURCE_TILE_METADATA`
+   - Purpose: Master metadata for homepage tiles
+   - Fields: tile_id

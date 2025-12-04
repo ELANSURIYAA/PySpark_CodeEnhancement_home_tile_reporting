@@ -1,146 +1,188 @@
 =============================================
 Author: Ascendion AAVA
 Date: 
-Description: Functional test cases for Home Tile Reporting ETL enhancement with metadata integration
+Description: Functional test cases for SOURCE_TILE_METADATA integration and tile_category enrichment in Home Tile Reporting ETL pipeline, as specified in SCRUM-7819.
 =============================================
 
-### Test Case ID: TC_SCRUM-7567_01
-**Title:** Validate metadata enrichment in daily summary
-**Description:** Ensure that the TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED table is populated with tile_name and tile_category from SOURCE_TILE_METADATA for active tiles.
-**Preconditions:**
-- SOURCE_TILE_METADATA contains at least one active tile (is_active = true).
-- SOURCE_HOME_TILE_EVENTS contains events for the same tile_id.
-**Steps to Execute:**
-1. Run the ETL pipeline for a date with relevant events and active tiles in metadata.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED for the date and tile_id.
-**Expected Result:**
-- tile_name and tile_category columns are populated as per SOURCE_TILE_METADATA for matching tile_id.
-- Only active tiles are present; inactive tiles are excluded.
-**Linked Jira Ticket:** SCRUM-7567
+# Functional Test Cases for Home Tile Reporting Enhancement (SCRUM-7819)
 
-### Test Case ID: TC_SCRUM-7567_02
-**Title:** Validate fallback for missing metadata
-**Description:** Ensure that if tile_name or tile_category is null in SOURCE_TILE_METADATA, the ETL populates default values in TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED.
-**Preconditions:**
-- SOURCE_TILE_METADATA contains a tile with null tile_name and/or tile_category.
-- SOURCE_HOME_TILE_EVENTS contains events for that tile_id.
-**Steps to Execute:**
-1. Run the ETL pipeline for a date with relevant events and the tile in metadata with null fields.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED for the tile_id.
-**Expected Result:**
-- tile_name is 'Unknown Tile' if null.
-- tile_category is 'Uncategorized' if null.
-**Linked Jira Ticket:** SCRUM-7567
+---
 
-### Test Case ID: TC_SCRUM-7567_03
-**Title:** Validate tile-level metrics aggregation
-**Description:** Ensure that unique_tile_views, unique_tile_clicks, and interstitial metrics are correctly aggregated per tile_id per day.
+### Test Case ID: TC_SCRUM-7819_01
+**Title:** Validate creation of SOURCE_TILE_METADATA table
+**Description:** Ensure the new metadata table is created with the correct schema and all required columns as per DDL.
 **Preconditions:**
-- SOURCE_HOME_TILE_EVENTS and SOURCE_INTERSTITIAL_EVENTS contain multiple events for the same tile_id and date.
+- Access to analytics_db with CREATE TABLE privileges.
+- No existing table named SOURCE_TILE_METADATA.
 **Steps to Execute:**
-1. Run the ETL pipeline for the relevant date.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED for the tile_id and date.
+1. Execute the DDL to create analytics_db.SOURCE_TILE_METADATA.
+2. Query the table schema.
+3. Compare the columns and types to the specification.
 **Expected Result:**
-- unique_tile_views = countDistinct(user_id) where event_type = 'TILE_VIEW'.
-- unique_tile_clicks = countDistinct(user_id) where event_type = 'TILE_CLICK'.
-- unique_interstitial_views = countDistinct(user_id) where interstitial_view_flag = true.
-- unique_interstitial_primary_clicks = countDistinct(user_id) where primary_button_click_flag = true.
-- unique_interstitial_secondary_clicks = countDistinct(user_id) where secondary_button_click_flag = true.
-**Linked Jira Ticket:** SCRUM-7567
+- Table is created with columns: tile_id, tile_name, tile_category, is_active, updated_ts.
+- Data types and comments match specification.
+**Linked Jira Ticket:** SCRUM-7819
 
-### Test Case ID: TC_SCRUM-7567_04
-**Title:** Validate CTR calculations and division by zero handling
-**Description:** Ensure that tile_ctr, primary_ctr, and secondary_ctr are correctly calculated and set to 0.0 when denominators are zero.
-**Preconditions:**
-- TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED has tiles with zero views or clicks.
-**Steps to Execute:**
-1. Run the ETL pipeline for a date with at least one tile having zero views or clicks.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED for the tile_id and date.
-**Expected Result:**
-- tile_ctr = unique_tile_clicks / unique_tile_views if views > 0, else 0.0.
-- primary_ctr = unique_interstitial_primary_clicks / unique_interstitial_views if views > 0, else 0.0.
-- secondary_ctr = unique_interstitial_secondary_clicks / unique_interstitial_views if views > 0, else 0.0.
-**Linked Jira Ticket:** SCRUM-7567
+---
 
-### Test Case ID: TC_SCRUM-7567_05
-**Title:** Validate category KPIs aggregation
-**Description:** Ensure that TARGET_HOME_TILE_CATEGORY_KPIS aggregates metrics correctly by tile_category and date.
+### Test Case ID: TC_SCRUM-7819_02
+**Title:** Validate ETL pipeline reads metadata table successfully
+**Description:** Ensure ETL job can read from SOURCE_TILE_METADATA without errors and loads active tile metadata.
 **Preconditions:**
-- TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED contains multiple tiles with the same tile_category.
+- SOURCE_TILE_METADATA table exists and is populated with sample data.
+- ETL job is deployed.
 **Steps to Execute:**
-1. Run the ETL pipeline for the relevant date.
-2. Query TARGET_HOME_TILE_CATEGORY_KPIS for the date and tile_category.
+1. Run the ETL pipeline.
+2. Check ETL logs for successful read of SOURCE_TILE_METADATA.
+3. Validate that only records with is_active = true are loaded.
 **Expected Result:**
-- category_tile_views = sum(unique_tile_views) grouped by date, tile_category.
-- category_tile_clicks = sum(unique_tile_clicks) grouped by date, tile_category.
-- category_interstitial_views = sum(unique_interstitial_views) grouped by date, tile_category.
-- category_primary_clicks = sum(unique_interstitial_primary_clicks) grouped by date, tile_category.
-- category_secondary_clicks = sum(unique_interstitial_secondary_clicks) grouped by date, tile_category.
-- category_ctr = category_tile_clicks / category_tile_views if views > 0, else 0.0.
-**Linked Jira Ticket:** SCRUM-7567
+- ETL reads metadata table without errors.
+- Only active tiles are loaded.
+**Linked Jira Ticket:** SCRUM-7819
 
-### Test Case ID: TC_SCRUM-7567_06
-**Title:** Validate inactive tiles exclusion
-**Description:** Ensure that tiles marked as is_active = false in SOURCE_TILE_METADATA are excluded from all enriched reporting tables.
-**Preconditions:**
-- SOURCE_TILE_METADATA contains at least one tile with is_active = false.
-- SOURCE_HOME_TILE_EVENTS contains events for that tile_id.
-**Steps to Execute:**
-1. Run the ETL pipeline for the relevant date.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED for the tile_id.
-**Expected Result:**
-- No records for tile_id with is_active = false in TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED.
-**Linked Jira Ticket:** SCRUM-7567
+---
 
-### Test Case ID: TC_SCRUM-7567_07
-**Title:** Validate referential integrity of tile_id
-**Description:** Ensure that tile_id values in TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED and TARGET_HOME_TILE_CATEGORY_KPIS exist in SOURCE_TILE_METADATA and events tables.
+### Test Case ID: TC_SCRUM-7819_03
+**Title:** Validate enrichment of tile_category in target table
+**Description:** Ensure tile_category is correctly populated in TARGET_HOME_TILE_DAILY_SUMMARY for all records with valid metadata.
 **Preconditions:**
-- All tables are populated with test data.
+- ETL pipeline configured to perform LEFT JOIN with SOURCE_TILE_METADATA.
+- Metadata table contains at least one matching tile_id for source events.
 **Steps to Execute:**
-1. Run the ETL pipeline for the relevant date.
-2. Query TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED and TARGET_HOME_TILE_CATEGORY_KPIS for tile_id and tile_category.
+1. Run the ETL pipeline.
+2. Query TARGET_HOME_TILE_DAILY_SUMMARY for recent records.
+3. Check that tile_category matches the metadata for each tile_id.
 **Expected Result:**
-- All tile_id values exist in both SOURCE_TILE_METADATA (is_active = true) and event tables.
-- No orphan tile_id records.
-**Linked Jira Ticket:** SCRUM-7567
+- tile_category is populated according to metadata for all matching tile_id values.
+**Linked Jira Ticket:** SCRUM-7819
 
-### Test Case ID: TC_SCRUM-7567_08
-**Title:** Validate partitioning by date in target tables
-**Description:** Ensure that TARGET_HOME_TILE_DAILY_SUMMARY_ENHANCED and TARGET_HOME_TILE_CATEGORY_KPIS are partitioned by date and support partition pruning.
-**Preconditions:**
-- Multiple days of data are available in source tables.
-**Steps to Execute:**
-1. Run the ETL pipeline for multiple dates.
-2. Query the target tables for specific date partitions.
-**Expected Result:**
-- Data is correctly partitioned by date.
-- Querying by date only scans relevant partitions.
-**Linked Jira Ticket:** SCRUM-7567
+---
 
-### Test Case ID: TC_SCRUM-7567_09
-**Title:** Validate broadcast join optimization for metadata
-**Description:** Ensure that the ETL uses broadcast join for SOURCE_TILE_METADATA and does not exceed cluster memory limits.
+### Test Case ID: TC_SCRUM-7819_04
+**Title:** Validate default category assignment for unmapped tiles
+**Description:** Ensure that if a tile_id in the source data does not exist in SOURCE_TILE_METADATA, tile_category is set to "UNKNOWN" in the target table.
 **Preconditions:**
-- SOURCE_TILE_METADATA is small enough for broadcast join.
-- Cluster memory limits are known.
+- At least one tile_id in source events does not exist in metadata table.
 **Steps to Execute:**
-1. Run the ETL pipeline with monitoring enabled.
-2. Check Spark UI or logs for broadcast join usage and memory consumption.
+1. Insert a new tile_id in source events not present in SOURCE_TILE_METADATA.
+2. Run the ETL pipeline.
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY for the new tile_id.
 **Expected Result:**
-- Broadcast join is used for metadata table.
-- No memory errors or spills.
-**Linked Jira Ticket:** SCRUM-7567
+- tile_category is set to "UNKNOWN" for unmapped tile_id.
+**Linked Jira Ticket:** SCRUM-7819
 
-### Test Case ID: TC_SCRUM-7567_10
-**Title:** Validate backward compatibility of existing reports
-**Description:** Ensure that existing reports and dashboards using old target tables continue to function after enhancement.
+---
+
+### Test Case ID: TC_SCRUM-7819_05
+**Title:** Validate backward compatibility (record counts unchanged)
+**Description:** Ensure the addition of tile_category and metadata enrichment does not alter the number of records output by the ETL pipeline.
 **Preconditions:**
-- Existing reports reference TARGET_HOME_TILE_DAILY_SUMMARY and TARGET_HOME_TILE_GLOBAL_KPIS.
+- Baseline record counts from previous ETL runs are available.
 **Steps to Execute:**
-1. Deploy the enhanced ETL pipeline.
-2. Run existing reports and dashboards.
+1. Run the ETL pipeline with and without metadata enrichment.
+2. Compare record counts in TARGET_HOME_TILE_DAILY_SUMMARY for the same date range.
 **Expected Result:**
-- No errors or missing data in existing reports.
-- Old tables remain unchanged and available.
-**Linked Jira Ticket:** SCRUM-7567
+- Record counts remain unchanged (no dropped or duplicated records).
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_06
+**Title:** Validate schema evolution of TARGET_HOME_TILE_DAILY_SUMMARY
+**Description:** Ensure the target table is updated to include the new tile_category column with correct data type and comment.
+**Preconditions:**
+- Table exists prior to schema change.
+**Steps to Execute:**
+1. Execute ALTER TABLE statement to add tile_category.
+2. Query the table schema.
+**Expected Result:**
+- tile_category column is present, type STRING, with correct comment.
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_07
+**Title:** Validate null and default value handling for tile_category
+**Description:** Ensure there are no NULL values in tile_category after ETL run; unmapped tiles should show "UNKNOWN".
+**Preconditions:**
+- ETL pipeline is configured with COALESCE logic for tile_category.
+**Steps to Execute:**
+1. Run the ETL pipeline.
+2. Query TARGET_HOME_TILE_DAILY_SUMMARY for records where tile_category IS NULL.
+**Expected Result:**
+- No records with tile_category IS NULL; all unmapped tiles have "UNKNOWN".
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_08
+**Title:** Validate referential integrity between target and metadata tables
+**Description:** Ensure all tile_id values in TARGET_HOME_TILE_DAILY_SUMMARY exist in SOURCE_TILE_METADATA, or have tile_category = "UNKNOWN".
+**Preconditions:**
+- Both tables contain data.
+**Steps to Execute:**
+1. Run the ETL pipeline.
+2. For each tile_id in TARGET_HOME_TILE_DAILY_SUMMARY, check existence in SOURCE_TILE_METADATA.
+3. For any missing, confirm tile_category is "UNKNOWN".
+**Expected Result:**
+- All mapped tile_id have valid category; missing tile_id have "UNKNOWN".
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_09
+**Title:** Validate error handling when metadata table is unavailable
+**Description:** Ensure ETL pipeline does not fail fatally if SOURCE_TILE_METADATA is temporarily unavailable; target table should still be populated with "UNKNOWN" categories.
+**Preconditions:**
+- Simulate metadata table unavailability (e.g., rename or drop table).
+**Steps to Execute:**
+1. Make SOURCE_TILE_METADATA unavailable.
+2. Run the ETL pipeline.
+3. Query TARGET_HOME_TILE_DAILY_SUMMARY for recent records.
+**Expected Result:**
+- ETL pipeline completes, all tile_category values are "UNKNOWN".
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_10
+**Title:** Validate unit test for tile_category enrichment logic
+**Description:** Ensure unit tests validate enrichment logic for both mapped and unmapped tile_id values.
+**Preconditions:**
+- Unit test framework is in place.
+- Sample data covers mapped and unmapped tiles.
+**Steps to Execute:**
+1. Run ETL unit tests for enrichment logic.
+2. Review test results for tile_category mapping and defaulting.
+**Expected Result:**
+- All unit tests pass; enrichment logic works as expected.
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_11
+**Title:** Validate regression test for overall ETL pipeline
+**Description:** Ensure the ETL pipeline continues to produce correct outputs for all fields, including new tile_category, after code changes.
+**Preconditions:**
+- Regression test suite covers all ETL outputs.
+**Steps to Execute:**
+1. Run regression test suite.
+2. Compare outputs before and after enhancement.
+**Expected Result:**
+- All regression tests pass; no unintended changes to existing outputs.
+**Linked Jira Ticket:** SCRUM-7819
+
+---
+
+### Test Case ID: TC_SCRUM-7819_12
+**Title:** Validate dashboard reporting of tile_category field
+**Description:** Ensure tile_category appears in reporting outputs and is available for BI dashboard consumption after ETL run.
+**Preconditions:**
+- BI dashboards are configured to query target table.
+**Steps to Execute:**
+1. Run ETL pipeline.
+2. Refresh BI dashboard data source.
+3. Confirm tile_category is available and populated in dashboard fields.
+**Expected Result:**
+- tile_category is visible and accurate in BI dashboards.
+**Linked Jira Ticket:** SCRUM-7819
